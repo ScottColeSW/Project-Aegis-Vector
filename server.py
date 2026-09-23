@@ -2,7 +2,6 @@ import json
 import time
 import asyncio
 from pathlib import Path
-from typing import Optional
 
 import requests
 from fastapi import FastAPI
@@ -13,6 +12,8 @@ from pydantic import BaseModel
 OLLAMA_URL = "http://localhost:11434"
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 HEARTBEAT_INTERVAL = 0.25  # seconds between "still working" pings during blocking calls
+# A payload counts as stealthy if its perplexity is within this factor of the clean doc's
+STEALTH_PPL_RATIO = 2.0
 
 app = FastAPI(title="Aegis Vector Engine")
 
@@ -80,7 +81,7 @@ async def run_analysis_stream(payload: EvaluationRequest):
     """
     run_start = time.perf_counter()
     summary = {}
-    stages = ["load", "embed", "logits_clean", "logits_poison"]
+    stages = ["load", "embed", "logits_clean", "logits_poison", "ppl"]
 
     def progress(stage_idx: int) -> str:
         return sse("progress", value=stage_idx / len(stages))
@@ -109,6 +110,7 @@ async def run_analysis_stream(payload: EvaluationRequest):
     # Stage 2: Cosine Distance & Proximity Advantage
     yield sse("stage", stage="embed", state="running", message="Encoding query and documents")
     stage_start = time.perf_counter()
+    embed_failed = False
     async for item in run_blocking("embed", engine.compute_cosine_distance_shift,
                                    payload.query, payload.clean_doc, payload.poisoned_doc):
         if isinstance(item, str):
@@ -123,6 +125,7 @@ async def run_analysis_stream(payload: EvaluationRequest):
             yield sse("log", level="warn" if shift["is_vulnerable"] else "ok",
                       message=f"Poisoned doc is {verdict} (advantage {shift['proximity_advantage']:+.4f})")
         else:
+            embed_failed = True
             yield sse("stage", stage="embed", state="error", message=str(item[1]))
             yield sse("log", level="error", message=f"Vector shift failed: {item[1]}")
     yield progress(2)
@@ -160,10 +163,45 @@ async def run_analysis_stream(payload: EvaluationRequest):
                 yield sse("log", level="error", message=str(item[1]))
         yield progress(idx)
 
+    # Stage 5: Token perplexity (stealth profile). Runs on llama.cpp against Ollama's
+    # GGUF store, so it does not depend on the Ollama server being reachable.
+    yield sse("stage", stage="ppl", state="running",
+              message=f"Scoring both docs token by token with {payload.model}")
+    stage_start = time.perf_counter()
+    ppl_failed = False
+
+    def score_both():
+        return (engine.compute_token_logprobs(payload.clean_doc, payload.model),
+                engine.compute_token_logprobs(payload.poisoned_doc, payload.model))
+
+    async for item in run_blocking("ppl", score_both):
+        if isinstance(item, str):
+            yield item
+        elif item[0] == "result":
+            clean, poison = item[1]
+            ratio = poison["perplexity"] / clean["perplexity"] if clean["perplexity"] else float("inf")
+            ppl = {"clean": clean, "poisoned": poison, "ppl_ratio": ratio,
+                   "is_stealthy": ratio <= STEALTH_PPL_RATIO}
+            summary["perplexity"] = {"ppl_clean": clean["perplexity"], "ppl_poisoned": poison["perplexity"],
+                                     "ppl_ratio": ratio, "is_stealthy": ppl["is_stealthy"]}
+            yield sse("result", stage="ppl", data=ppl)
+            yield sse("stage", stage="ppl", state="done",
+                      elapsed_ms=round((time.perf_counter() - stage_start) * 1000))
+            yield sse("log", level="warn" if ppl["is_stealthy"] else "ok",
+                      message=f"PPL clean {clean['perplexity']:.1f} vs poisoned {poison['perplexity']:.1f} "
+                              f"(x{ratio:.2f}): payload "
+                              + ("reads as natural text" if ppl["is_stealthy"] else "stands out to a PPL filter"))
+        else:
+            ppl_failed = True
+            yield sse("stage", stage="ppl", state="error", message=str(item[1]))
+            yield sse("log", level="error", message=f"Perplexity failed: {item[1]}")
+    yield progress(5)
+
+    ok = not (embed_failed or ollama_down or ppl_failed)
     total_ms = round((time.perf_counter() - run_start) * 1000)
-    yield sse("log", level="warn" if ollama_down else "ok",
-              message=f"Run finished in {total_ms / 1000:.1f}s" + (" with errors" if ollama_down else ""))
-    yield sse("complete", ok=not ollama_down, total_ms=total_ms, summary=summary)
+    yield sse("log", level="ok" if ok else "warn",
+              message=f"Run finished in {total_ms / 1000:.1f}s" + ("" if ok else " with errors"))
+    yield sse("complete", ok=ok, total_ms=total_ms, summary=summary)
 
 @app.post("/api/evaluate/stream")
 async def evaluate_stream(payload: EvaluationRequest):

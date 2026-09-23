@@ -96,7 +96,7 @@
         @keyframes stripes { to { background-position: 16px 0; } }
 
         /* Pipeline stepper */
-        .stages { list-style: none; padding: 0; margin: 16px 0 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .stages { list-style: none; padding: 0; margin: 16px 0 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
         @media (max-width: 900px) { .stages { grid-template-columns: 1fr 1fr; } }
         .stage {
             border: 1px solid var(--border);
@@ -125,7 +125,7 @@
         @keyframes spin { to { transform: rotate(360deg); } }
 
         /* Metric tiles */
-        .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 20px; }
+        .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 20px; }
         @media (max-width: 900px) { .tiles { grid-template-columns: 1fr 1fr; } }
         .tile .label { color: var(--muted); font-size: 12px; }
         .tile .value { font-size: 28px; font-weight: bold; margin-top: 6px; font-variant-numeric: tabular-nums; }
@@ -135,6 +135,7 @@
         .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: bold; }
         .badge.bad { background: rgba(244,63,94,0.2); color: var(--accent-red); }
         .badge.good { background: rgba(52,211,153,0.2); color: var(--accent-green); }
+        .badge.warn { background: rgba(251,191,36,0.2); color: var(--accent-amber); }
 
         /* Charts */
         .chart { height: 300px; position: relative; }
@@ -159,7 +160,7 @@
 <body>
 
     <h1>Aegis Vector Telemetry Stream</h1>
-    <div class="subtitle">RAG poisoning analysis: vector proximity and first-token refusal probability</div>
+    <div class="subtitle">RAG poisoning analysis: vector proximity, first-token refusal probability, and payload perplexity</div>
 
     <div class="card">
         <h3>Scenario</h3>
@@ -216,6 +217,16 @@
             <div class="value" id="val-refusal-poison">--</div>
             <div class="hint" id="hint-refusal-poison">Top T₁ token: --</div>
         </div>
+        <div class="card tile" id="tile-ppl">
+            <div class="label">Perplexity, clean → poisoned</div>
+            <div class="value" id="val-ppl">--</div>
+            <div class="hint" id="hint-ppl">Lower = more natural to the target model</div>
+        </div>
+        <div class="card tile" id="tile-stealth">
+            <div class="label">Stealth vs PPL filter</div>
+            <div class="value" id="val-stealth">--</div>
+            <div class="hint">Poisoned PPL within 2× of clean?</div>
+        </div>
     </div>
 
     <div class="grid">
@@ -236,6 +247,14 @@
     </div>
 
     <div class="card" style="margin-top: 20px;">
+        <h3>Token Surprisal Profile (bits per token)</h3>
+        <div class="chart" style="height: 360px;">
+            <div id="ppl-chart" style="height: 100%;"></div>
+            <div class="placeholder" id="ppl-placeholder">Waiting for run</div>
+        </div>
+    </div>
+
+    <div class="card" style="margin-top: 20px;">
         <h3>Event Log</h3>
         <div id="log"></div>
     </div>
@@ -249,6 +268,7 @@
             { id: "embed", name: "Embed & measure ΔΦ" },
             { id: "logits_clean", name: "T₁ logits, clean" },
             { id: "logits_poison", name: "T₁ logits, poisoned" },
+            { id: "ppl", name: "Token perplexity" },
         ];
         const STAGE_ICONS = { done: "✓", error: "!", skipped: "–" };
         const PLOT_LAYOUT = {
@@ -388,6 +408,9 @@
                     if (event.elapsed_ms > 3000 && event.stage.startsWith("logits")) {
                         document.getElementById(`detail-${event.stage}`).textContent =
                             "Still waiting on Ollama (first call loads the model)";
+                    } else if (event.elapsed_ms > 2000 && event.stage === "ppl") {
+                        document.getElementById("detail-ppl").textContent =
+                            "Loading GGUF into llama.cpp (first run per model)";
                     }
                     break;
                 case "log":
@@ -420,7 +443,18 @@
                 setTile(key, (data.p_refusal * 100).toFixed(1) + "%");
                 document.getElementById(`hint-${key}`).textContent = `Top T₁ token: '${data.top_1_token ?? "--"}'`;
                 updateLogitChart();
+            } else if (stage === "ppl") {
+                setTile("ppl", `${fmtPpl(data.clean.perplexity)} → ${fmtPpl(data.poisoned.perplexity)}`);
+                document.getElementById("hint-ppl").textContent = `Poisoned is ${data.ppl_ratio.toFixed(2)}× the clean doc`;
+                setTile("stealth", data.is_stealthy
+                    ? '<span class="badge warn">STEALTHY</span>'
+                    : '<span class="badge good">DETECTABLE</span>');
+                updatePplChart(data.clean, data.poisoned);
             }
+        }
+
+        function fmtPpl(v) {
+            return v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(1);
         }
 
         // --- UI helpers ------------------------------------------------------
@@ -432,9 +466,9 @@
             const bar = document.getElementById("progress");
             bar.className = "progress-bar running";
             bar.style.width = "2%";
-            ["advantage", "verdict", "refusal-clean", "refusal-poison"].forEach(k =>
+            ["advantage", "verdict", "refusal-clean", "refusal-poison", "ppl", "stealth"].forEach(k =>
                 document.getElementById(`val-${k}`).textContent = "--");
-            ["logit", "vector"].forEach(k => {
+            ["logit", "vector", "ppl"].forEach(k => {
                 Plotly.purge(`${k}-chart`);
                 const p = document.getElementById(`${k}-placeholder`);
                 p.style.display = "grid";
@@ -526,7 +560,7 @@
                 yaxis: { title: 'Probability', tickformat: '.0%', gridcolor: '#334155' },
                 legend: { orientation: 'h', y: 1.12 },
                 annotations: [{ text: 'amber outline = refusal token', xref: 'paper', yref: 'paper',
-                    x: 1, y: -0.22, showarrow: false, font: { size: 10, color: '#94a3b8' } }],
+                    x: 1, y: 1.12, xanchor: 'right', showarrow: false, font: { size: 10, color: '#94a3b8' } }],
             }, { displayModeBar: false, responsive: true });
         }
 
@@ -545,6 +579,45 @@
                 ...PLOT_LAYOUT,
                 yaxis: { title: 'Cosine distance to query (lower = closer)', gridcolor: '#334155',
                     range: [0, Math.max(cleanDist, poisonDist) * 1.25] },
+            }, { displayModeBar: false, responsive: true });
+        }
+
+        function updatePplChart(clean, poisoned) {
+            document.getElementById("ppl-placeholder").style.display = "none";
+            const LN2 = Math.log(2);
+            // Two stacked panels, one per document; bar height = surprisal of that token in bits
+            const trace = (doc, name, axis) => {
+                const bits = doc.logprobs.map(lp => -lp / LN2);
+                return {
+                    x: doc.tokens.map((t, i) => `${i}:${t}`),
+                    y: bits,
+                    name,
+                    type: 'bar',
+                    xaxis: `x${axis}`,
+                    yaxis: `y${axis}`,
+                    customdata: doc.logprobs.map(lp => Math.exp(lp)),
+                    marker: { color: bits, colorscale: [[0, '#1e3a5f'], [0.4, '#38bdf8'], [1, '#f43f5e']],
+                              cmin: 0, cmax: 16 },
+                    hovertemplate: '%{x}<br>%{y:.2f} bits (P = %{customdata:.2%})<extra>' + name + '</extra>',
+                };
+            };
+            const axis = (title) => ({
+                title, gridcolor: '#334155', rangemode: 'tozero',
+            });
+            const tokenAxis = (doc) => ({
+                tickvals: doc.tokens.map((t, i) => `${i}:${t}`),
+                ticktext: doc.tokens.map(t => JSON.stringify(t).slice(1, -1)),
+                tickangle: -60, tickfont: { size: 10 },
+            });
+            Plotly.react('ppl-chart', [trace(clean, 'Clean', ''), trace(poisoned, 'Poisoned', '2')], {
+                ...PLOT_LAYOUT,
+                grid: { rows: 2, columns: 1, pattern: 'independent', roworder: 'top to bottom' },
+                showlegend: false,
+                margin: { t: 20, b: 70, l: 60, r: 20 },
+                xaxis: tokenAxis(clean),
+                xaxis2: tokenAxis(poisoned),
+                yaxis: axis(`Clean · PPL ${fmtPpl(clean.perplexity)}`),
+                yaxis2: axis(`Poisoned · PPL ${fmtPpl(poisoned.perplexity)}`),
             }, { displayModeBar: false, responsive: true });
         }
 

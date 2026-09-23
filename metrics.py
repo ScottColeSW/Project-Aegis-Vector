@@ -1,4 +1,5 @@
 import os
+import threading
 import json
 import numpy as np
 import torch
@@ -170,6 +171,18 @@ class AegisScoringEngine:
         
         Formula:
             PPL(X) = exp( -1/M * sum_{i=1}^M log P(x_i | x_{<i}) )
+        """
+        return self.compute_token_logprobs(text, model_name, n_ctx)["perplexity"]
+
+    def compute_token_logprobs(
+        self,
+        text: str,
+        model_name: str = "llama3.1:8b",
+        n_ctx: int = 2048
+    ) -> Dict[str, Any]:
+        """
+        Scores every token of `text` under the target model and returns the per-token
+        log-probabilities along with the sequence perplexity.
 
         Ollama only returns logprobs for generated tokens, never for the prompt, so the
         prompt is scored with llama.cpp directly against the GGUF file Ollama already
@@ -177,17 +190,19 @@ class AegisScoringEngine:
         """
         llm = self._load_scoring_model(model_name, n_ctx)
 
-        # BOS first, so every token of `text` is conditioned on something and gets scored
-        tokens = llm.tokenize(text.encode("utf-8"), add_bos=True)[:n_ctx]
-        if len(tokens) < 2:
-            return float("inf")
+        with self._scoring_lock:
+            # BOS first, so every token of `text` is conditioned on something and gets scored
+            tokens = llm.tokenize(text.encode("utf-8"), add_bos=True)[:n_ctx]
+            if len(tokens) < 2:
+                return {"tokens": [], "logprobs": [], "perplexity": float("inf")}
 
-        llm.reset()
-        llm.eval(tokens)
+            llm.reset()
+            llm.eval(tokens)
 
-        # Row i holds the logits for predicting tokens[i + 1]
-        logits = np.array(llm.scores[:len(tokens) - 1], dtype=np.float64)
-        targets = np.array(tokens[1:])
+            # Row i holds the logits for predicting tokens[i + 1]
+            logits = np.array(llm.scores[:len(tokens) - 1], dtype=np.float64)
+            targets = np.array(tokens[1:])
+            token_strs = [llm.detokenize([t]).decode("utf-8", errors="replace") for t in tokens[1:]]
 
         # Numerically stable log-softmax: log P(x) = z_x - logsumexp(z)
         row_max = logits.max(axis=1, keepdims=True)
@@ -198,13 +213,18 @@ class AegisScoringEngine:
         mean_nll = -float(token_logprobs.mean())
         
         # Perplexity = exp(mean NLL)
-        perplexity = float(np.exp(mean_nll))
-        return perplexity
+        return {
+            "tokens": token_strs,
+            "logprobs": token_logprobs.tolist(),
+            "perplexity": float(np.exp(mean_nll))
+        }
 
     def _load_scoring_model(self, model_name: str, n_ctx: int):
         """Loads (and caches) a llama.cpp model with per-token logits for an Ollama model name."""
         cache = self.__dict__.setdefault("_scoring_models", {})
-        if model_name not in cache:
+        with self._scoring_lock:
+            if model_name in cache:
+                return cache[model_name]
             from llama_cpp import Llama  # deferred: only perplexity needs llama.cpp
             cache[model_name] = Llama(
                 model_path=str(resolve_ollama_gguf(model_name)),
@@ -212,7 +232,12 @@ class AegisScoringEngine:
                 n_ctx=n_ctx,
                 verbose=False
             )
-        return cache[model_name]
+            return cache[model_name]
+
+    @property
+    def _scoring_lock(self) -> threading.RLock:
+        # A llama.cpp context holds one sequence at a time; serialize eval + readback
+        return self.__dict__.setdefault("_scoring_lock_obj", threading.RLock())
 
 
 def resolve_ollama_gguf(model_name: str) -> Path:
