@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local runtime state
+chroma_db/
+models/
+*.gguf
+
+# Editor / agent local config
+.claude/
+.vscode/
+.idea/
