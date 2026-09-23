@@ -60,7 +60,9 @@ class AegisScoringEngine:
             "top_logprobs": top_k,
             "options": {
                 "num_predict": 1,  # Only evaluate T_1
-                "temperature": 0.0
+                "temperature": 0.0,
+                # Ollama otherwise allocates the model's full context (often 128K), costing GBs
+                "num_ctx": 4096
             }
         }
 
@@ -227,7 +229,7 @@ class AegisScoringEngine:
                 return cache[model_name]
             from llama_cpp import Llama  # deferred: only perplexity needs llama.cpp
             cache[model_name] = Llama(
-                model_path=str(resolve_ollama_gguf(model_name)),
+                model_path=str(resolve_ollama_gguf(model_name, self.ollama_url)),
                 logits_all=True,  # keep logits for every prompt position, not just the last
                 n_ctx=n_ctx,
                 verbose=False
@@ -236,17 +238,39 @@ class AegisScoringEngine:
             atexit.register(cache[model_name].close)
             return cache[model_name]
 
+    def unload_scoring_models(self) -> None:
+        """Frees every llama.cpp model loaded for perplexity scoring."""
+        with self._scoring_lock:
+            for llm in self.__dict__.pop("_scoring_models", {}).values():
+                llm.close()
+
     @property
     def _scoring_lock(self) -> threading.RLock:
         # A llama.cpp context holds one sequence at a time; serialize eval + readback
         return self.__dict__.setdefault("_scoring_lock_obj", threading.RLock())
 
 
-def resolve_ollama_gguf(model_name: str) -> Path:
+def resolve_ollama_gguf(model_name: str, ollama_url: str = "http://localhost:11434") -> Path:
     """
     Maps an Ollama model name (e.g. "llama3.2", "qwen2.5:7b") to the GGUF weights
-    file in Ollama's local store, by reading the model's manifest.
+    file Ollama serves it from.
+
+    Asks the running Ollama server first (`/api/show` reports the weights path in its
+    Modelfile `FROM` line), since the server's store may live anywhere, e.g. a custom
+    OLLAMA_MODELS set only for the service. Falls back to reading the manifest from
+    the default store when the server is not reachable.
     """
+    try:
+        response = requests.post(f"{ollama_url.rstrip('/')}/api/show", json={"model": model_name}, timeout=10)
+        response.raise_for_status()
+        for line in response.json().get("modelfile", "").splitlines():
+            if line.startswith("FROM "):
+                candidate = Path(line[5:].strip())
+                if candidate.is_file():
+                    return candidate
+    except (requests.RequestException, ValueError):
+        pass
+
     name, _, tag = model_name.partition(":")
     if "/" not in name:
         name = f"library/{name}"

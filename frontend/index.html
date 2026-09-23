@@ -622,7 +622,14 @@
         }
 
         renderStages();
-        loadModels();
+        // ?model=<name> preselects a target, ?autorun=1 starts a run on load (demos, screenshots)
+        const params = new URLSearchParams(location.search);
+        loadModels().then(() => {
+            const select = document.getElementById("model");
+            const wanted = params.get("model");
+            if (wanted && [...select.options].some(o => o.value === wanted)) select.value = wanted;
+            if (params.has("autorun")) startEvaluation();
+        });
     </script>
 </body>
 </html>
