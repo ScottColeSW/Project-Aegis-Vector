@@ -1,8 +1,6 @@
-import os
-import uuid
 import numpy as np
 import chromadb
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 from sentence_transformers import SentenceTransformer
 
 # ---------------------------------------------------------------------------

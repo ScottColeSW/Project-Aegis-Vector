@@ -1,11 +1,11 @@
 import os
+import atexit
 import threading
 import json
 import numpy as np
-import torch
 import requests
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import Dict, Any
 from sentence_transformers import SentenceTransformer
 
 # ---------------------------------------------------------------------------
@@ -232,6 +232,8 @@ class AegisScoringEngine:
                 n_ctx=n_ctx,
                 verbose=False
             )
+            # Free while the interpreter is intact; llama_cpp's __del__ errors during teardown
+            atexit.register(cache[model_name].close)
             return cache[model_name]
 
     @property

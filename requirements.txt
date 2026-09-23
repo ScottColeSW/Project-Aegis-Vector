@@ -1,0 +1,17 @@
+# Server / dashboard
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.0
+requests>=2.31
+
+# Metrics
+numpy>=1.26,<2
+sentence-transformers>=2.7
+chromadb>=0.5
+
+# Exact prompt perplexity and raw logits (prebuilt CPU wheels:
+#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu)
+llama-cpp-python>=0.3
+
+# Experiment report charts
+matplotlib>=3.8

@@ -1,5 +1,6 @@
+import atexit
 import numpy as np
-from typing import Dict, Any
+from typing import Dict
 from llama_cpp import Llama, LlamaGrammar
 
 class LocalEngineSampler:
@@ -13,6 +14,8 @@ class LocalEngineSampler:
             n_ctx=2048,
             verbose=False
         )
+        # Free while the interpreter is intact; llama_cpp's __del__ errors during teardown
+        atexit.register(self.llm.close)
 
     def extract_raw_step1_logits(self, prompt: str, top_k: int = 10) -> Dict[str, float]:
         """
@@ -71,8 +74,12 @@ class LocalEngineSampler:
 # Execution Example
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    # Specify local model path (e.g., Llama-3-8B Q4_K_M GGUF)
-    MODEL_PATH = "./models/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
+    import sys
+    from metrics import resolve_ollama_gguf
+
+    # Accepts a GGUF path or an Ollama model name (reuses Ollama's local weights)
+    target = sys.argv[1] if len(sys.argv) > 1 else "llama3.2"
+    MODEL_PATH = target if target.endswith(".gguf") else str(resolve_ollama_gguf(target))
     
     try:
         sampler = LocalEngineSampler(model_path=MODEL_PATH)
