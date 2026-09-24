@@ -26,6 +26,9 @@
             padding: 20px;
         }
         h1 { margin: 0 0 4px; }
+        .site-nav { float: right; display: flex; gap: 16px; font-size: 13px; margin-top: 6px; }
+        .site-nav a { color: var(--muted); text-decoration: none; }
+        .site-nav a:hover { color: var(--accent-blue); text-decoration: underline; }
         h3 { margin: 0 0 12px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
         .subtitle { color: var(--muted); margin-bottom: 20px; }
         .grid {
@@ -167,6 +170,7 @@
 </head>
 <body>
 
+    <nav class="site-nav"><a href="about.html">About the Creator</a><a href="books.html">Books</a></nav>
     <h1>Aegis Vector Telemetry Stream</h1>
     <div class="subtitle">RAG poisoning analysis: vector manifold, first-token refusal probability, and payload perplexity</div>
 
@@ -328,12 +332,15 @@
             try {
                 const res = await fetch(`${API_BASE}/api/models`);
                 const body = await res.json();
-                const models = body.models.filter(m => !m.includes("embed"));
+                const models = body.models;
                 if (!body.ok || !models.length) throw new Error(body.error || "no chat models found");
-                select.innerHTML = models.map(m => `<option>${m}</option>`).join("");
-                const preferred = models.find(m => m.startsWith("llama3")) || models[0];
-                select.value = preferred;
-                log("info", `Found ${models.length} Ollama models`);
+                // Same budget as the batteries' preflight: models that would not fit are listed but disabled
+                select.innerHTML = models.map(m =>
+                    `<option value="${m.name}" ${m.fits ? "" : "disabled"}>${m.name} (${m.size_gb} GB${m.fits ? "" : ", won't fit"})</option>`
+                ).join("");
+                const usable = models.filter(m => m.fits).map(m => m.name);
+                select.value = usable.find(m => m.startsWith("llama3")) || usable[0] || models[0].name;
+                log("info", `Found ${models.length} Ollama models (${usable.length} fit in memory: ${body.memory})`);
             } catch (e) {
                 select.innerHTML = `<option>llama3.1:8b</option>`;
                 log("warn", `Could not list Ollama models (${e.message}). Logit stages may fail.`);

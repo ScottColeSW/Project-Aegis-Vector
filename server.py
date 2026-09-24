@@ -3,9 +3,10 @@ import time
 import asyncio
 from pathlib import Path
 
-import requests
+import resource_guard as guard
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -241,15 +242,17 @@ async def evaluate_stream(payload: EvaluationRequest):
 
 @app.get("/api/models")
 def list_models():
-    """Lists local Ollama models so the dashboard can offer a target picker."""
+    """Lists installed completion models with sizes and whether each fits in free memory."""
     try:
-        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
-        response.raise_for_status()
-        names = [m["name"] for m in response.json().get("models", [])]
-        return {"ok": True, "models": names}
+        catalog = guard.ollama_catalog()
+        snapshot = guard.memory_snapshot()
+        budget = snapshot["ram_available"] + (snapshot["vram_free"] or 0)
+        names = sorted(n for n in catalog if not (n.endswith(":latest") and n.removesuffix(":latest") in catalog))
+        models = [{"name": n, "size_gb": round(catalog[n] / guard.GB, 1),
+                   "fits": catalog[n] * guard.FOOTPRINT_FACTOR <= budget} for n in names]
+        return {"ok": True, "models": models, "memory": guard.describe(snapshot)}
     except Exception as e:
         return {"ok": False, "models": [], "error": str(e)}
 
-@app.get("/")
-def index():
-    return FileResponse(FRONTEND_DIR / "index.html")
+# Dashboard, About, and Books pages. Mounted last so the /api routes above take priority.
+app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
