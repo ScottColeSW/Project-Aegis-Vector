@@ -113,7 +113,13 @@ class AegisScoringEngine:
             "p_refusal": float(p_refusal),
             "top_1_token": top_1_token,
             "refusal_breakdown": refusal_breakdown,
-            "top_tokens_distribution": token_probs
+            "top_tokens_distribution": token_probs,
+            # What the call cost, as Ollama reports it (load time excluded)
+            "usage": {
+                "prompt_tokens": data.get("prompt_eval_count", 0),
+                "output_tokens": data.get("eval_count", 0),
+                "seconds": (data.get("prompt_eval_duration", 0) + data.get("eval_duration", 0)) / 1e9,
+            }
         }
 
     # -----------------------------------------------------------------------

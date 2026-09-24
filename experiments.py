@@ -76,7 +76,9 @@ def bar(done, total, label, width=28):
 # ---------------------------------------------------------------------------
 # Ollama helpers
 # ---------------------------------------------------------------------------
-def ollama_generate(model, prompt, num_predict=64, system=None, format=None):
+def ollama_generate(model, prompt, num_predict=64, system=None, format=None, meta=False):
+    """Returns the response text, or (text, cost) with meta=True, where cost carries the
+    token counts and wall time Ollama reports for the call."""
     body = {
         "model": model,
         "prompt": prompt,
@@ -90,7 +92,16 @@ def ollama_generate(model, prompt, num_predict=64, system=None, format=None):
         body["format"] = format  # JSON schema: Ollama constrains decoding to match it
     response = guard.post_with_retry(f"{OLLAMA_URL}/api/generate", body, timeout=600)
     response.raise_for_status()
-    return response.json()["response"]
+    data = response.json()
+    if not meta:
+        return data["response"]
+    # Ollama durations are nanoseconds; load time is excluded so a cold model
+    # doesn't make one defense look more expensive than another
+    return data["response"], {
+        "prompt_tokens": data.get("prompt_eval_count", 0),
+        "output_tokens": data.get("eval_count", 0),
+        "seconds": (data.get("prompt_eval_duration", 0) + data.get("eval_duration", 0)) / 1e9,
+    }
 
 
 def ollama_unload(model):

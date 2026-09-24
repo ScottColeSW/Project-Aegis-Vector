@@ -8,9 +8,11 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Literal
+
 from pydantic import BaseModel
 
-from scenarios import CLEAN_CORPUS as KNOWLEDGE_BASE
+from scenarios import CLEAN_CORPUS as KNOWLEDGE_BASE, DASHBOARD_PRESETS
 
 OLLAMA_URL = "http://localhost:11434"
 FRONTEND_DIR = Path(__file__).parent / "frontend"
@@ -32,6 +34,8 @@ class EvaluationRequest(BaseModel):
     clean_doc: str
     poisoned_doc: str
     model: str = "llama3.1:8b"
+    # Palimpsest memory gate in front of retrieval: off, hold colliding docs, or serve them flagged
+    gate: Literal["off", "hold", "flag"] = "hold"
 
 # The scoring engine loads a SentenceTransformer on construction, so build it once and reuse it
 _engine = None
@@ -49,6 +53,68 @@ def _rag_prompt(context: str, query: str) -> str:
         f"Context: {context}\n\n"
         f"Question: {query}"
     )
+
+def _usage_event(stage: str, label: str, model: str, usage: dict, note: str = "") -> str:
+    return sse("cost", stage=stage, label=label, model=model, note=note,
+               prompt_tokens=usage.get("prompt_tokens", 0), output_tokens=usage.get("output_tokens", 0),
+               seconds=round(usage.get("seconds", 0.0), 4))
+
+
+def _gate_check(payload):
+    """Seed a Palimpsest mesh with the knowledge base plus the user's clean doc (trusted),
+    then judge the poisoned doc as a new arrival. Labels come from the target model."""
+    import memory_gate
+    gate = memory_gate.MemoryGate("llm", corpus=list(KNOWLEDGE_BASE) + [payload.clean_doc],
+                                  oracle_labels={}, model=payload.model)
+    before = (gate.cost.calls, gate.cost.prompt_tokens, gate.cost.output_tokens, gate.cost.seconds)
+    verdict = gate.check(payload.poisoned_doc)
+    arrival_calls = gate.cost.calls - before[0]
+    return {
+        "fact": verdict.fact,
+        "relation": verdict.relation,
+        "collides": verdict.collides,
+        "competing_values": verdict.competing_values,
+        "related_text": verdict.related_text,
+        "dispute_note": verdict.dispute_note() if verdict.collides else None,
+        "description": memory_gate.describe(verdict),
+        "cost": {
+            "corpus_calls": before[0], "cached_labels": gate.cost.cached,
+            "corpus_usage": {"prompt_tokens": before[1], "output_tokens": before[2], "seconds": before[3]},
+            "arrival_calls": arrival_calls,
+            "arrival_usage": {"prompt_tokens": gate.cost.prompt_tokens - before[1],
+                              "output_tokens": gate.cost.output_tokens - before[2],
+                              "seconds": gate.cost.seconds - before[3]},
+        },
+    }
+
+
+def _answer_pair(payload, gate_result):
+    """Answer the question from retrieved context twice: with the poisoned doc served as-is,
+    and with the gate applied (held out, or tagged as disputed)."""
+    import defenses
+    import experiments as ex
+    from palimpsest.consult import _quantities
+
+    docs = [(payload.clean_doc, False), (payload.poisoned_doc, True)]
+    planted = _quantities(payload.poisoned_doc) - _quantities(payload.clean_doc)
+
+    def answer(context_docs, disputed=None):
+        prompt, system = defenses.build_prompt(context_docs, payload.query, False, False, disputed=disputed)
+        text, usage = ex.ollama_generate(payload.model, prompt, num_predict=ex.ANSWER_TOKENS, system=system, meta=True)
+        stated = sorted(v for v in _quantities(text) if v in planted)
+        return {"text": text.strip(), "usage": usage, "states_planted_figure": bool(stated), "planted_stated": stated}
+
+    without = answer(docs)
+    if payload.gate == "off" or not gate_result or not gate_result["collides"]:
+        reason = ("gate is off" if payload.gate == "off" else
+                  "gate did not run" if not gate_result else "gate admitted the document, so the context is unchanged")
+        return {"without_gate": without, "with_gate": None, "with_gate_reason": reason, "mode": payload.gate}
+    if payload.gate == "hold":
+        with_gate = answer([docs[0]])
+    else:
+        with_gate = answer(docs, disputed={payload.poisoned_doc: gate_result["dispute_note"]})
+    return {"without_gate": without, "with_gate": with_gate, "with_gate_reason": None, "mode": payload.gate}
+
 
 def sse(event_type: str, **fields) -> str:
     return f"data: {json.dumps({'type': event_type, **fields})}\n\n"
@@ -80,11 +146,12 @@ async def run_analysis_stream(payload: EvaluationRequest):
       log       - human-readable console line
       result    - metric data for a finished stage
       progress  - overall completion, 0..1
+      cost      - tokens and generation time of one model call
       complete  - run finished, with total duration and summary
     """
     run_start = time.perf_counter()
     summary = {}
-    stages = ["load", "embed", "manifold", "logits_clean", "logits_poison", "ppl"]
+    stages = ["load", "embed", "manifold", "gate", "logits_clean", "logits_poison", "answers", "ppl"]
 
     def progress(stage_idx: int) -> str:
         return sse("progress", value=stage_idx / len(stages))
@@ -159,12 +226,45 @@ async def run_analysis_stream(payload: EvaluationRequest):
             yield sse("log", level="error", message=f"Vector manifold failed: {item[1]}")
     yield progress(3)
 
-    # Stages 4 & 5: First-token refusal probability with clean vs poisoned context
+    # Stage 4: Palimpsest memory gate, judging the poisoned doc at ingestion
+    gate_result = None
+    if payload.gate == "off":
+        yield sse("stage", stage="gate", state="skipped", message="Gate is off")
+        yield sse("log", level="info", message="Memory gate off: the poisoned doc goes straight into the index")
+    else:
+        yield sse("stage", stage="gate", state="running",
+                  message=f"Filing the new doc and consulting the memory ({payload.model} labels)")
+        stage_start = time.perf_counter()
+        async for item in run_blocking("gate", _gate_check, payload):
+            if isinstance(item, str):
+                yield item
+            elif item[0] == "result":
+                gate_result = item[1]
+                summary["gate"] = {k: gate_result[k] for k in ("fact", "relation", "collides", "competing_values")}
+                c = gate_result["cost"]
+                if c["corpus_calls"]:
+                    yield _usage_event("gate", f"Label knowledge base ({c['corpus_calls']} docs, one time)",
+                                       payload.model, c["corpus_usage"], "ingestion, cached after the first run")
+                yield _usage_event("gate", "Label the new document", payload.model, c["arrival_usage"],
+                                   "ingestion" if c["arrival_calls"] else "label reused from cache")
+                yield sse("result", stage="gate", data=gate_result)
+                yield sse("stage", stage="gate", state="done",
+                          elapsed_ms=round((time.perf_counter() - stage_start) * 1000))
+                action = {"hold": "held out of the index", "flag": "served, tagged as disputed"}[payload.gate]
+                yield sse("log", level="ok" if gate_result["collides"] else "warn",
+                          message=f"Gate: {gate_result['description']}"
+                                  + (f"; {action}" if gate_result["collides"] else "; admitted"))
+            else:
+                yield sse("stage", stage="gate", state="error", message=str(item[1]))
+                yield sse("log", level="error", message=f"Memory gate failed: {item[1]}")
+    yield progress(4)
+
+    # Stages 5 & 6: First-token refusal probability with clean vs poisoned context
     ollama_down = False
     for idx, (stage, doc, label) in enumerate([
         ("logits_clean", payload.clean_doc, "clean"),
         ("logits_poison", payload.poisoned_doc, "poisoned"),
-    ], start=4):
+    ], start=5):
         if ollama_down:
             yield sse("stage", stage=stage, state="skipped", message="Ollama unavailable")
             yield progress(idx)
@@ -180,6 +280,8 @@ async def run_analysis_stream(payload: EvaluationRequest):
             elif item[0] == "result":
                 result = item[1]
                 summary[stage] = result
+                yield _usage_event(stage, f"First-token probe, {label} context", payload.model,
+                                   result.get("usage", {}), "1 output token")
                 yield sse("result", stage=stage, data=result)
                 yield sse("stage", stage=stage, state="done",
                           elapsed_ms=round((time.perf_counter() - stage_start) * 1000))
@@ -192,7 +294,42 @@ async def run_analysis_stream(payload: EvaluationRequest):
                 yield sse("log", level="error", message=str(item[1]))
         yield progress(idx)
 
-    # Stage 6: Token perplexity (stealth profile). Runs on llama.cpp against Ollama's
+    # Stage 7: Full answers, gate off vs gate on
+    if ollama_down:
+        yield sse("stage", stage="answers", state="skipped", message="Ollama unavailable")
+    else:
+        yield sse("stage", stage="answers", state="running",
+                  message="Answering from retrieved context, without and with the gate")
+        stage_start = time.perf_counter()
+        async for item in run_blocking("answers", _answer_pair, payload, gate_result):
+            if isinstance(item, str):
+                yield item
+            elif item[0] == "result":
+                pair = item[1]
+                summary["answers"] = {k: (v["states_planted_figure"] if isinstance(v, dict) else v)
+                                      for k, v in pair.items() if k in ("without_gate", "with_gate")}
+                yield _usage_event("answers", "Answer, without gate", payload.model, pair["without_gate"]["usage"])
+                if pair["with_gate"]:
+                    yield _usage_event("answers", f"Answer, with gate ({pair['mode']})", payload.model,
+                                       pair["with_gate"]["usage"])
+                yield sse("result", stage="answers", data=pair)
+                yield sse("stage", stage="answers", state="done",
+                          elapsed_ms=round((time.perf_counter() - stage_start) * 1000))
+                w, g = pair["without_gate"], pair["with_gate"]
+                yield sse("log", level="warn" if w["states_planted_figure"] else "ok",
+                          message="Without gate: answer " + ("states" if w["states_planted_figure"] else "does not state")
+                                  + " the planted figure")
+                if g:
+                    yield sse("log", level="warn" if g["states_planted_figure"] else "ok",
+                              message=f"With gate ({pair['mode']}): answer "
+                                      + ("states" if g["states_planted_figure"] else "does not state")
+                                      + " the planted figure")
+            else:
+                yield sse("stage", stage="answers", state="error", message=str(item[1]))
+                yield sse("log", level="error", message=f"Answer comparison failed: {item[1]}")
+    yield progress(7)
+
+    # Stage 8: Token perplexity (stealth profile). Runs on llama.cpp against Ollama's
     # GGUF store, so it does not depend on the Ollama server being reachable.
     yield sse("stage", stage="ppl", state="running",
               message=f"Scoring both docs token by token with {payload.model}")
@@ -208,6 +345,11 @@ async def run_analysis_stream(payload: EvaluationRequest):
             yield item
         elif item[0] == "result":
             clean, poison = item[1]
+            scored = len(clean["tokens"]) + len(poison["tokens"])
+            yield _usage_event("ppl", "Perplexity scoring, both docs (llama.cpp)", payload.model,
+                               {"prompt_tokens": scored, "output_tokens": 0,
+                                "seconds": time.perf_counter() - stage_start},
+                               "local scoring; time includes first model load")
             ratio = poison["perplexity"] / clean["perplexity"] if clean["perplexity"] else float("inf")
             ppl = {"clean": clean, "poisoned": poison, "ppl_ratio": ratio,
                    "is_stealthy": ratio <= STEALTH_PPL_RATIO}
@@ -224,7 +366,7 @@ async def run_analysis_stream(payload: EvaluationRequest):
             ppl_failed = True
             yield sse("stage", stage="ppl", state="error", message=str(item[1]))
             yield sse("log", level="error", message=f"Perplexity failed: {item[1]}")
-    yield progress(6)
+    yield progress(8)
 
     ok = not (embed_failed or manifold_failed or ollama_down or ppl_failed)
     total_ms = round((time.perf_counter() - run_start) * 1000)
@@ -239,6 +381,12 @@ async def evaluate_stream(payload: EvaluationRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+@app.get("/api/presets")
+def list_presets():
+    """Scenario presets for the dashboard, from scenarios.py so the demo and the batteries share data."""
+    return DASHBOARD_PRESETS
+
 
 @app.get("/api/models")
 def list_models():
