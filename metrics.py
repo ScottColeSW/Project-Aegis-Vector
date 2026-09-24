@@ -58,6 +58,8 @@ class AegisScoringEngine:
             # Ollama expects logprobs as top-level request fields, not model options
             "logprobs": True,
             "top_logprobs": top_k,
+            # Unload an idle model after a minute instead of Ollama's 5-minute default
+            "keep_alive": "1m",
             "options": {
                 "num_predict": 1,  # Only evaluate T_1
                 "temperature": 0.0,

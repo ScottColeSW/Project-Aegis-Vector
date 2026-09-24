@@ -37,6 +37,7 @@ from pathlib import Path
 import numpy as np
 
 import experiments as ex
+import resource_guard as guard
 from metrics import AegisScoringEngine
 from rag_pipeline import AegisRAGPipeline
 from scenarios import CLEAN_CORPUS, POISON_VARIANTS, TARGET_QUERIES
@@ -191,6 +192,10 @@ def generate_all(models, queries, contexts, ppl_report):
     answers = {}   # (model, defense, variant, query) -> answer text
     for i, model in enumerate(models, start=1):
         say(f"Phase 2 [{i}/{len(models)}] {model}")
+        fits, message = guard.preflight(model)
+        say(message, 1)
+        if not fits:
+            continue
         t = time.perf_counter()
         cache = {}
         jobs = [(cond, v, q) for cond in sorted(generated_conditions) for v in variants for q in queries]
@@ -199,7 +204,7 @@ def generate_all(models, queries, contexts, ppl_report):
             docs = contexts["baseline" if rejected else variant][q]
             prompt, system = build_prompt(docs, q, provenance, spotlight, spoofed)
             if (prompt, system) not in cache:
-                cache[(prompt, system)] = ex.ollama_generate(model, prompt, system=system).strip()
+                cache[(prompt, system)] = ex.ollama_generate(model, prompt, num_predict=ex.ANSWER_TOKENS, system=system).strip()
             for defense, cond in CONDITIONS.items():
                 if cond == (filtered, provenance, spotlight, spoofed):
                     answers[(model, defense, variant, q)] = cache[(prompt, system)]
@@ -214,6 +219,10 @@ def generate_all(models, queries, contexts, ppl_report):
 # ---------------------------------------------------------------------------
 def judge_all(answers):
     say(f"Phase 3: labeling answers with {JUDGE_MODEL}")
+    fits, message = guard.preflight(JUDGE_MODEL)
+    say(message, 1)
+    if not fits:
+        raise SystemExit(f"Judge {JUDGE_MODEL} does not fit in free memory; close other GPU/RAM users and rerun")
     unique = sorted({(q, a) for (_, _, _, q), a in answers.items()})
     labels = {}
     for i, (q, a) in enumerate(unique, start=1):
