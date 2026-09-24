@@ -31,6 +31,7 @@ from scenarios import (
 )
 
 GATE_MODEL = "llama3.2"
+ADJUDICATOR_MODEL = "qwen2.5:3b"  # Palimpsest's reference adjudicator default
 OTHER = "other"
 
 SCOPES = {"general": Scope.GENERAL, "specific_case": Scope.INSTANCE}
@@ -77,6 +78,7 @@ class Verdict:
     competing_values: list | None = None
     scope: str = "general"
     review_needed: bool = False
+    adjudication: dict | None = None
 
     @property
     def collides(self):
@@ -165,20 +167,24 @@ class MemoryGate:
             apply_consult(store, node, consult(store, node))
         return store
 
-    def check(self, text, oracle_label=(ORACLE_PAYLOAD_LABEL, "general"), store=None):
-        """Judge a new arrival against the mesh without modifying it."""
+    def check(self, text, oracle_label=(ORACLE_PAYLOAD_LABEL, "general"), store=None, adjudicator=None):
+        """Judge a new arrival against the mesh without modifying it. `adjudicator` is Palimpsest's
+        optional model check, consulted only on reinforcements and review items; it can raise a flag,
+        never lower one."""
         fact, scope = self.label(text, oracle=oracle_label)
         if fact == OTHER:
             return Verdict(fact=fact, relation="unfiled", scope=scope)
-        result = consult(store or self.store, self._node("arrival", text, fact, scope))
+        result = consult(store or self.store, self._node("arrival", text, fact, scope), adjudicator=adjudicator)
         return Verdict(
             fact=fact, relation=result.relation.value, scope=scope, review_needed=result.review_needed,
+            adjudication=result.adjudication,
             related_text=result.related_node.text if result.related_node else None,
             competing_values=[sorted(s) for s in result.competing_values] if result.competing_values else None,
         )
 
-    def payload_verdicts(self):
-        return {name: self.check(text, oracle_label=(ORACLE_PAYLOAD_LABEL, ORACLE_PAYLOAD_SCOPES.get(name, "general")))
+    def payload_verdicts(self, adjudicator=None):
+        return {name: self.check(text, oracle_label=(ORACLE_PAYLOAD_LABEL, ORACLE_PAYLOAD_SCOPES.get(name, "general")),
+                                 adjudicator=adjudicator)
                 for name, text in POISON_VARIANTS.items()}
 
     def false_positives(self):
@@ -211,6 +217,11 @@ def build_gates(labelers=("oracle", "llm")):
             "seconds": time.perf_counter() - t,
         }
     if "llm" in labelers:
+        # For comparison only: the same model-labeled gate with Palimpsest's adjudicator added
+        from palimpsest.adjudicate import ollama_adjudicator
+        judge = ollama_adjudicator(ADJUDICATOR_MODEL)
+        gates["llm"]["adjudicated"] = gates["llm"]["gate"].payload_verdicts(adjudicator=judge)
+        ex.ollama_unload(ADJUDICATOR_MODEL)
         ex.ollama_unload(GATE_MODEL)
     return gates
 
@@ -219,6 +230,8 @@ def describe(verdict):
     if verdict.relation == "unfiled":
         return f"filed as '{verdict.fact}' -> not a registered fact, passes unchecked"
     detail = f" ({verdict.competing_values[0]} vs {verdict.competing_values[1]})" if verdict.competing_values else ""
-    status = "SCOPE_LINK, REVIEW NEEDED" if verdict.review_needed else verdict.relation.upper()
+    status = (f"{verdict.relation.upper()}, REVIEW NEEDED" if verdict.review_needed else verdict.relation.upper())
+    if verdict.adjudication:
+        status += f" [adjudicator: {verdict.adjudication['verdict']}]"
     scope = ", specific case" if verdict.scope == "specific_case" else ""
     return f"filed as '{verdict.fact}'{scope} -> {status}{detail}"

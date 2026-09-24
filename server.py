@@ -399,21 +399,35 @@ def list_episodes():
 class LiveEpisodeRequest(BaseModel):
     number: int
     model: str
+    defense: str | None = None  # a rematch replays the episode's forgery against White Hat's counter
 
 
 @app.post("/api/episodes/live")
 def live_episode(req: LiveEpisodeRequest):
-    """Run one episode live against a chosen model (sync, so FastAPI runs it in a worker thread)."""
-    from episodes import SCRIPT, run_live
+    """Run one episode live against a chosen model (sync, so FastAPI runs it in a worker thread).
+    Every completed run is appended to the live log, so the player and the dashboard can tally it."""
+    from episodes import SCRIPT, record_live, run_live
     if not 1 <= req.number <= len(SCRIPT):
         return {"error": f"episode must be 1-{len(SCRIPT)}"}
+    from defenses import CONDITIONS
+    if req.defense is not None and req.defense not in CONDITIONS:
+        return {"error": f"unknown defense {req.defense}"}
     fits, message = guard.preflight(req.model)
     if not fits:
         return {"error": message}
     try:
-        return run_live(req.number, req.model, _load_engine())
+        result = run_live(req.number, req.model, _load_engine(), req.defense)
     except Exception as e:
         return {"error": str(e)}
+    record_live(result)
+    return result
+
+
+@app.get("/api/episodes/live")
+def live_history():
+    """Every live run so far, with per-episode and per-model tallies."""
+    from episodes import live_summary
+    return live_summary()
 
 
 @app.get("/api/presets")

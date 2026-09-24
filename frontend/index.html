@@ -342,6 +342,18 @@
     </div>
 
     <div class="card" style="margin-top: 20px;">
+        <div class="card-header">
+            <h3>Live Episode Runs</h3>
+            <span style="font-size: 12px; color: var(--muted);"><a href="episodes.html" style="color: inherit;">Run one from the episode player</a> · <a href="#" onclick="loadLiveRuns(); return false;" style="color: inherit;">refresh</a></span>
+        </div>
+        <p id="live-summary" style="font-size: 12px; color: var(--muted); margin: 4px 0 8px;">Loading</p>
+        <table class="cost">
+            <thead><tr><th>Episode</th><th>Defense</th><th>Live runs</th><th>Took the forgery</th><th>Live rate</th><th>Battery rate</th></tr></thead>
+            <tbody id="live-rows"><tr><td colspan="6" style="text-align: left; color: var(--muted);">No live runs yet</td></tr></tbody>
+        </table>
+    </div>
+
+    <div class="card" style="margin-top: 20px;">
         <h3>Event Log</h3>
         <div id="log"></div>
     </div>
@@ -1000,8 +1012,45 @@
             }, { displayModeBar: false, responsive: true });
         }
 
+        // Live runs from the episode player, logged by the server, beside the battery's rate for the same matchup
+        async function loadLiveRuns() {
+            const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            try {
+                const [live, eps] = await Promise.all([
+                    fetch(`${API_BASE}/api/episodes/live`).then(r => r.json()),
+                    fetch(`${API_BASE}/api/episodes`).then(r => r.json()),
+                ]);
+                const byId = Object.fromEntries((eps.episodes || []).map(e => [e.id, e]));
+                const models = Object.entries(live.by_model || {}).map(([m, t]) => `${esc(m)} ${t.adopted}/${t.runs}`).join(" · ");
+                document.getElementById("live-summary").innerHTML = live.total
+                    ? `${live.total} live runs, ${live.adopted} took the forgery. By model: ${models}. Live answers are scored with the quick planted-claim check; the battery uses the judge.`
+                    : "No live runs yet. Each Run live in the episode player is logged here.";
+                // Episode order, each episode's rematch rounds after it in ladder order
+                const order = key => {
+                    const [id, counter] = key.split(":");
+                    const ep = byId[id.replace("R", "")];
+                    const rung = counter && ep ? (ep.ladder || []).findIndex(l => l.defense === counter) : -1;
+                    return parseInt(id, 10) + (counter ? 0.1 + 0.01 * (rung + 1) : 0);
+                };
+                const rows = Object.entries(live.by_episode || {}).sort((a, b) => order(a[0]) - order(b[0])).map(([n, t]) => {
+                    // "9R:layered" is a rematch round of episode 9 against that counter
+                    const [id, counter] = n.split(":");
+                    const ep = byId[id.replace("R", "")];
+                    const rung = counter && ep ? (ep.ladder || []).find(l => l.defense === counter) : null;
+                    const rate = counter ? (rung && rung.adoption != null ? rung.adoption : null) : (ep ? ep.adoption : null);
+                    const title = ep ? (counter ? `Rematch: ${ep.title}` : ep.title) : "";
+                    return `<tr><td>${esc(id)}. ${esc(title)}</td><td>${esc((counter || (ep ? ep.defense : "")).replace(/_/g, " "))}</td>
+                        <td>${t.runs}</td><td>${t.adopted}</td><td>${Math.round(t.adopted / t.runs * 100)}%</td>
+                        <td>${rate != null ? Math.round(rate * 100) + "%" : "n/a"}</td></tr>`;
+                });
+                if (rows.length) document.getElementById("live-rows").innerHTML = rows.join("");
+            } catch (e) {
+                document.getElementById("live-summary").textContent = `Could not load live runs: ${e.message}`;
+            }
+        }
+
         renderStages();
-        // ?model=<name> preselects a target, ?autorun=1 starts a run on load (demos, screenshots)
+        loadLiveRuns();        // ?model=<name> preselects a target, ?autorun=1 starts a run on load (demos, screenshots)
         const params = new URLSearchParams(location.search);
         Promise.all([loadModels(), loadPresets()]).then(() => {
             if (params.get("gate") && ["off", "hold", "flag"].includes(params.get("gate"))) setGate(params.get("gate"));

@@ -419,6 +419,7 @@ def write_outputs(out_dir, meta, ppl_report, models, records, adoption, utility,
     cost_chart(img / "defense_cost.png", adoption, cost_summary, models)
 
     gate_json = {labeler: {"verdicts": {v: vars(verdict) for v, verdict in g["verdicts"].items()},
+                           "adjudicated": {v: vars(verdict) for v, verdict in g.get("adjudicated", {}).items()},
                            "false_positives": g["false_positives"], "corpus_labels": g["corpus_labels"]}
                  for labeler, g in gates.items()}
     (out_dir / "defenses.json").write_text(json.dumps({
@@ -463,9 +464,14 @@ def write_outputs(out_dir, meta, ppl_report, models, records, adoption, utility,
     lines += ["", "## Palimpsest memory gate", "",
               "Each new document is filed under a registered fact (or \"other\") and consulted against the "
               "verified corpus with Palimpsest's `consult()`. Answers above use the model labeler's verdicts.", "",
-              "| Payload | " + " | ".join(f"{l} labels" for l in gates) + " |", "|---|" + "---|" * len(gates)]
+              "The last column adds Palimpsest's optional adjudicator (qwen2.5:3b), which may raise a flag but never "
+              "lower one; it is reported for comparison and not used for the answers above.", "",
+              "| Payload | " + " | ".join(f"{l} labels" for l in gates) + " | llm labels + adjudicator |",
+              "|---|" + "---|" * (len(gates) + 1)]
+    adjudicated = gates.get("llm", {}).get("adjudicated", {})
     for v in POISON_VARIANTS:
-        lines.append(f"| {v} | " + " | ".join(memory_gate.describe(g["verdicts"][v]) for g in gates.values()) + " |")
+        lines.append(f"| {v} | " + " | ".join(memory_gate.describe(g["verdicts"][v]) for g in gates.values())
+                     + f" | {memory_gate.describe(adjudicated[v]) if v in adjudicated else 'n/a'} |")
     lines.append("")
     for labeler, g in gates.items():
         fps = g["false_positives"]
