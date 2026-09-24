@@ -73,9 +73,12 @@ def _gate_check(payload):
         "fact": verdict.fact,
         "relation": verdict.relation,
         "collides": verdict.collides,
+        "review_needed": verdict.review_needed,
+        "quarantined": verdict.quarantined,
+        "scope": verdict.scope,
         "competing_values": verdict.competing_values,
         "related_text": verdict.related_text,
-        "dispute_note": verdict.dispute_note() if verdict.collides else None,
+        "dispute_note": verdict.dispute_note() if verdict.quarantined else None,
         "description": memory_gate.describe(verdict),
         "cost": {
             "corpus_calls": before[0], "cached_labels": gate.cost.cached,
@@ -105,7 +108,7 @@ def _answer_pair(payload, gate_result):
         return {"text": text.strip(), "usage": usage, "states_planted_figure": bool(stated), "planted_stated": stated}
 
     without = answer(docs)
-    if payload.gate == "off" or not gate_result or not gate_result["collides"]:
+    if payload.gate == "off" or not gate_result or not gate_result["quarantined"]:
         reason = ("gate is off" if payload.gate == "off" else
                   "gate did not run" if not gate_result else "gate admitted the document, so the context is unchanged")
         return {"without_gate": without, "with_gate": None, "with_gate_reason": reason, "mode": payload.gate}
@@ -240,7 +243,8 @@ async def run_analysis_stream(payload: EvaluationRequest):
                 yield item
             elif item[0] == "result":
                 gate_result = item[1]
-                summary["gate"] = {k: gate_result[k] for k in ("fact", "relation", "collides", "competing_values")}
+                summary["gate"] = {k: gate_result[k] for k in
+                                   ("fact", "scope", "relation", "collides", "review_needed", "competing_values")}
                 c = gate_result["cost"]
                 if c["corpus_calls"]:
                     yield _usage_event("gate", f"Label knowledge base ({c['corpus_calls']} docs, one time)",
@@ -250,10 +254,10 @@ async def run_analysis_stream(payload: EvaluationRequest):
                 yield sse("result", stage="gate", data=gate_result)
                 yield sse("stage", stage="gate", state="done",
                           elapsed_ms=round((time.perf_counter() - stage_start) * 1000))
-                action = {"hold": "held out of the index", "flag": "served, tagged as disputed"}[payload.gate]
-                yield sse("log", level="ok" if gate_result["collides"] else "warn",
+                action = {"hold": "quarantined, held out of the index", "flag": "served, tagged"}[payload.gate]
+                yield sse("log", level="ok" if gate_result["quarantined"] else "warn",
                           message=f"Gate: {gate_result['description']}"
-                                  + (f"; {action}" if gate_result["collides"] else "; admitted"))
+                                  + (f"; {action}" if gate_result["quarantined"] else "; admitted"))
             else:
                 yield sse("stage", stage="gate", state="error", message=str(item[1]))
                 yield sse("log", level="error", message=f"Memory gate failed: {item[1]}")
@@ -381,6 +385,16 @@ async def evaluate_stream(payload: EvaluationRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+@app.get("/api/episodes")
+def list_episodes():
+    """Black Hat vs White Hat episodes, narrated in episodes.py, numbers from the defenses battery."""
+    from episodes import build_episodes
+    try:
+        return build_episodes()
+    except FileNotFoundError:
+        return {"episodes": [], "error": "Run defenses.py first: results/defenses/defenses.json is missing"}
+
 
 @app.get("/api/presets")
 def list_presets():
