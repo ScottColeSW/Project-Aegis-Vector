@@ -396,6 +396,26 @@ def list_episodes():
         return {"episodes": [], "error": "Run defenses.py first: results/defenses/defenses.json is missing"}
 
 
+class LiveEpisodeRequest(BaseModel):
+    number: int
+    model: str
+
+
+@app.post("/api/episodes/live")
+def live_episode(req: LiveEpisodeRequest):
+    """Run one episode live against a chosen model (sync, so FastAPI runs it in a worker thread)."""
+    from episodes import SCRIPT, run_live
+    if not 1 <= req.number <= len(SCRIPT):
+        return {"error": f"episode must be 1-{len(SCRIPT)}"}
+    fits, message = guard.preflight(req.model)
+    if not fits:
+        return {"error": message}
+    try:
+        return run_live(req.number, req.model, _load_engine())
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/presets")
 def list_presets():
     """Scenario presets for the dashboard, from scenarios.py so the demo and the batteries share data."""
