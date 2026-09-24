@@ -73,12 +73,13 @@ Aegis Vector runs entirely on local infrastructure with zero external API depend
 
 | File | Role |
 | --- | --- |
-| `metrics.py` | `AegisScoringEngine`: P<sub>refusal</sub>, cosine shift ΔΦ, per-token logprobs and perplexity |
+| `metrics.py` | `AegisScoringEngine`: P<sub>refusal</sub>, cosine shift ΔΦ, 3D vector manifold, per-token logprobs and perplexity |
 | `rag_pipeline.py` | `AegisRAGPipeline`: corpus ingestion, poison injection, ARP and MRR benchmarking |
 | `local_sampler.py` | Raw T<sub>1</sub> logits and GBNF-constrained generation through llama.cpp |
 | `server.py` | FastAPI app: `/` dashboard, `/api/evaluate/stream` SSE telemetry, `/api/models` |
 | `frontend/index.html` | Live telemetry dashboard |
 | `experiments.py` | Batch experiment runner that writes `results/` |
+| `scenarios.py` | Shared knowledge base, target queries, poison payloads, and refusal probes |
 
 ---
 
@@ -110,11 +111,22 @@ python experiments.py
 
 ## Live Dashboard
 
-Each run streams five stages to the browser as they happen: embedder load, embedding and ΔΦ, T<sub>1</sub> logits with the clean context, T<sub>1</sub> logits with the poisoned context, and token perplexity. Every stage card shows a live timer and its final duration; slow steps (first-time model loads) keep reporting while they work. Results land in metric tiles, a clean vs poisoned logit comparison, a ΔΦ chart, a per-token surprisal profile, and a timestamped event log.
+Each run streams six stages to the browser as they happen: embedder load, embedding and ΔΦ, the 3D vector manifold, T<sub>1</sub> logits with the clean context, T<sub>1</sub> logits with the poisoned context, and token perplexity. Every stage card shows a live timer and its final duration; slow steps (first-time model loads) keep reporting while they work. Results land in metric tiles, an interactive 3D manifold, a clean vs poisoned logit comparison, a ΔΦ chart, a per-token surprisal profile, and a timestamped event log. Add `?model=<name>&autorun=1` to the URL to preselect a model and start a run on load.
 
 ![Aegis Vector live dashboard after a completed run](docs/dashboard.png)
 
-The surprisal profile above shows why perplexity filters struggle: the `OVERRIDE POLICY` payload scores 74.6 against 71.7 for the real policy text, because only two tokens (`VERIDE` and `Ignore`) are surprising and the rest reads as ordinary corporate prose.
+### 3D vector manifold
+
+![Query-centered vector manifold: the poisoned doc sits inside the top-3 retrieval sphere](docs/vector_manifold.png)
+
+The manifold embeds the query, both documents, and the 20-document policy knowledge base from `scenarios.py`, then offers two layouts:
+
+* **Query-centered (default):** the query sits at the origin and every document is placed at its *exact* cosine distance from it, with direction taken from PCA. The translucent sphere passes through the k-th nearest document, so anything inside it is what the retriever returns. Above, the `OVERRIDE POLICY` payload is the nearest document (rank 1 of 22) while the real policy text only just makes the top 3.
+* **PCA:** a plain 3-component projection showing the global shape of the corpus. It keeps about a third of the variance, so on-screen distance is approximate; retrieval ranks and the drawn top-k links always come from the full 384-dimensional space.
+
+Hover any point for its text and distance; drag to rotate.
+
+The surprisal profile in the dashboard screenshot shows why perplexity filters struggle: the `OVERRIDE POLICY` payload scores 74.6 against 71.7 for the real policy text, because only two tokens (`VERIDE` and `Ignore`) are surprising and the rest reads as ordinary corporate prose.
 
 ---
 

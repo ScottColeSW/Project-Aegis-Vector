@@ -9,6 +9,8 @@ from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from scenarios import CLEAN_CORPUS as KNOWLEDGE_BASE
+
 OLLAMA_URL = "http://localhost:11434"
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 HEARTBEAT_INTERVAL = 0.25  # seconds between "still working" pings during blocking calls
@@ -81,7 +83,7 @@ async def run_analysis_stream(payload: EvaluationRequest):
     """
     run_start = time.perf_counter()
     summary = {}
-    stages = ["load", "embed", "logits_clean", "logits_poison", "ppl"]
+    stages = ["load", "embed", "manifold", "logits_clean", "logits_poison", "ppl"]
 
     def progress(stage_idx: int) -> str:
         return sse("progress", value=stage_idx / len(stages))
@@ -130,12 +132,38 @@ async def run_analysis_stream(payload: EvaluationRequest):
             yield sse("log", level="error", message=f"Vector shift failed: {item[1]}")
     yield progress(2)
 
-    # Stages 3 & 4: First-token refusal probability with clean vs poisoned context
+    # Stage 3: 3D vector manifold of the query, both docs, and the background knowledge base
+    yield sse("stage", stage="manifold", state="running",
+              message=f"Projecting {len(KNOWLEDGE_BASE) + 3} embeddings to 3D")
+    stage_start = time.perf_counter()
+    manifold_failed = False
+    async for item in run_blocking("manifold", engine.compute_vector_manifold,
+                                   payload.query, payload.clean_doc, payload.poisoned_doc, KNOWLEDGE_BASE):
+        if isinstance(item, str):
+            yield item
+        elif item[0] == "result":
+            manifold = item[1]
+            summary["manifold"] = {k: manifold[k] for k in
+                                   ("clean_rank", "poisoned_rank", "num_documents", "poison_retrieved")}
+            yield sse("result", stage="manifold", data=manifold)
+            yield sse("stage", stage="manifold", state="done",
+                      elapsed_ms=round((time.perf_counter() - stage_start) * 1000))
+            yield sse("log", level="warn" if manifold["poison_retrieved"] else "ok",
+                      message=f"Retrieval rank: poisoned #{manifold['poisoned_rank']}, clean #{manifold['clean_rank']} "
+                              f"of {manifold['num_documents']} docs (top-{manifold['top_k']} "
+                              + ("includes the poison)" if manifold["poison_retrieved"] else "excludes the poison)"))
+        else:
+            manifold_failed = True
+            yield sse("stage", stage="manifold", state="error", message=str(item[1]))
+            yield sse("log", level="error", message=f"Vector manifold failed: {item[1]}")
+    yield progress(3)
+
+    # Stages 4 & 5: First-token refusal probability with clean vs poisoned context
     ollama_down = False
     for idx, (stage, doc, label) in enumerate([
         ("logits_clean", payload.clean_doc, "clean"),
         ("logits_poison", payload.poisoned_doc, "poisoned"),
-    ], start=3):
+    ], start=4):
         if ollama_down:
             yield sse("stage", stage=stage, state="skipped", message="Ollama unavailable")
             yield progress(idx)
@@ -163,7 +191,7 @@ async def run_analysis_stream(payload: EvaluationRequest):
                 yield sse("log", level="error", message=str(item[1]))
         yield progress(idx)
 
-    # Stage 5: Token perplexity (stealth profile). Runs on llama.cpp against Ollama's
+    # Stage 6: Token perplexity (stealth profile). Runs on llama.cpp against Ollama's
     # GGUF store, so it does not depend on the Ollama server being reachable.
     yield sse("stage", stage="ppl", state="running",
               message=f"Scoring both docs token by token with {payload.model}")
@@ -195,9 +223,9 @@ async def run_analysis_stream(payload: EvaluationRequest):
             ppl_failed = True
             yield sse("stage", stage="ppl", state="error", message=str(item[1]))
             yield sse("log", level="error", message=f"Perplexity failed: {item[1]}")
-    yield progress(5)
+    yield progress(6)
 
-    ok = not (embed_failed or ollama_down or ppl_failed)
+    ok = not (embed_failed or manifold_failed or ollama_down or ppl_failed)
     total_ms = round((time.perf_counter() - run_start) * 1000)
     yield sse("log", level="ok" if ok else "warn",
               message=f"Run finished in {total_ms / 1000:.1f}s" + ("" if ok else " with errors"))

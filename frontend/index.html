@@ -96,7 +96,8 @@
         @keyframes stripes { to { background-position: 16px 0; } }
 
         /* Pipeline stepper */
-        .stages { list-style: none; padding: 0; margin: 16px 0 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+        .stages { list-style: none; padding: 0; margin: 16px 0 0; display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+        @media (max-width: 1300px) { .stages { grid-template-columns: repeat(3, 1fr); } }
         @media (max-width: 900px) { .stages { grid-template-columns: 1fr 1fr; } }
         .stage {
             border: 1px solid var(--border);
@@ -145,6 +146,13 @@
         }
         .placeholder.loading::after { content: ""; width: 14px; height: 14px; margin-left: 8px; border: 2px solid var(--accent-blue); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; vertical-align: middle; }
 
+        .manifold-stats { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+        .manifold-stats b { color: var(--text-color); font-variant-numeric: tabular-nums; }
+        .card-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+        .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+        .segmented button { background: transparent; color: var(--muted); border-radius: 0; padding: 6px 12px; font-size: 12px; }
+        .segmented button.active { background: var(--accent-blue); color: #000; }
+
         /* Log console */
         #log {
             height: 180px; overflow-y: auto; background: var(--bg-color);
@@ -160,7 +168,7 @@
 <body>
 
     <h1>Aegis Vector Telemetry Stream</h1>
-    <div class="subtitle">RAG poisoning analysis: vector proximity, first-token refusal probability, and payload perplexity</div>
+    <div class="subtitle">RAG poisoning analysis: vector manifold, first-token refusal probability, and payload perplexity</div>
 
     <div class="card">
         <h3>Scenario</h3>
@@ -229,6 +237,22 @@
         </div>
     </div>
 
+    <div class="card" style="margin-top: 20px;">
+        <div class="card-header">
+            <h3>3D Vector Manifold</h3>
+            <div class="segmented" role="group" aria-label="Manifold layout">
+                <button id="layout-centered" class="active" onclick="setManifoldLayout('centered')">Query-centered</button>
+                <button id="layout-pca" onclick="setManifoldLayout('pca')">PCA</button>
+            </div>
+            <span class="manifold-stats" style="margin: 0;">Drag to rotate · scroll to zoom · hover for text</span>
+        </div>
+        <div class="manifold-stats" id="manifold-stats">Query, both documents, and a 20-document policy knowledge base, embedded with bge-small-en-v1.5</div>
+        <div class="chart" style="height: 540px;">
+            <div id="manifold-chart" style="height: 100%;"></div>
+            <div class="placeholder" id="manifold-placeholder">Waiting for run</div>
+        </div>
+    </div>
+
     <div class="grid">
         <div class="card">
             <h3>Top-K Logit Distribution (T₁)</h3>
@@ -266,6 +290,7 @@
         const STAGES = [
             { id: "load", name: "Load embedder" },
             { id: "embed", name: "Embed & measure ΔΦ" },
+            { id: "manifold", name: "Vector manifold" },
             { id: "logits_clean", name: "T₁ logits, clean" },
             { id: "logits_poison", name: "T₁ logits, poisoned" },
             { id: "ppl", name: "Token perplexity" },
@@ -443,6 +468,8 @@
                 setTile(key, (data.p_refusal * 100).toFixed(1) + "%");
                 document.getElementById(`hint-${key}`).textContent = `Top T₁ token: '${data.top_1_token ?? "--"}'`;
                 updateLogitChart();
+            } else if (stage === "manifold") {
+                updateManifoldChart(data);
             } else if (stage === "ppl") {
                 setTile("ppl", `${fmtPpl(data.clean.perplexity)} → ${fmtPpl(data.poisoned.perplexity)}`);
                 document.getElementById("hint-ppl").textContent = `Poisoned is ${data.ppl_ratio.toFixed(2)}× the clean doc`;
@@ -468,13 +495,16 @@
             bar.style.width = "2%";
             ["advantage", "verdict", "refusal-clean", "refusal-poison", "ppl", "stealth"].forEach(k =>
                 document.getElementById(`val-${k}`).textContent = "--");
-            ["logit", "vector", "ppl"].forEach(k => {
+            ["logit", "vector", "ppl", "manifold"].forEach(k => {
                 Plotly.purge(`${k}-chart`);
                 const p = document.getElementById(`${k}-placeholder`);
                 p.style.display = "grid";
                 p.classList.add("loading");
                 p.textContent = "Computing";
             });
+            manifoldData = null;
+            document.getElementById("manifold-stats").textContent =
+                "Query, both documents, and a 20-document policy knowledge base, embedded with bge-small-en-v1.5";
             runStart = performance.now();
             clearInterval(clockTimer);
             clockTimer = setInterval(() => {
@@ -580,6 +610,156 @@
                 yaxis: { title: 'Cosine distance to query (lower = closer)', gridcolor: '#334155',
                     range: [0, Math.max(cleanDist, poisonDist) * 1.25] },
             }, { displayModeBar: false, responsive: true });
+        }
+
+        const MANIFOLD_STYLE = {
+            corpus:   { name: "Knowledge base", color: '#64748b', size: 5, symbol: 'circle' },
+            clean:    { name: "Clean doc", color: '#38bdf8', size: 11, symbol: 'circle' },
+            poisoned: { name: "Poisoned doc", color: '#f43f5e', size: 11, symbol: 'circle' },
+            query:    { name: "Query", color: '#fbbf24', size: 9, symbol: 'diamond' },
+        };
+
+        function wrapForHover(text, width = 60) {
+            const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const lines = [];
+            let line = "";
+            for (const word of escaped.split(/\s+/)) {
+                if (line && (line + " " + word).length > width) { lines.push(line); line = word; }
+                else line = line ? line + " " + word : word;
+            }
+            if (line) lines.push(line);
+            return lines.join("<br>");
+        }
+
+        let manifoldData = null;
+        let manifoldLayout = "centered";
+
+        function setManifoldLayout(mode) {
+            manifoldLayout = mode;
+            document.getElementById("layout-centered").classList.toggle("active", mode === "centered");
+            document.getElementById("layout-pca").classList.toggle("active", mode === "pca");
+            if (manifoldData) updateManifoldChart(manifoldData);
+        }
+
+        function updateManifoldChart(data) {
+            manifoldData = data;
+            document.getElementById("manifold-placeholder").style.display = "none";
+            const centered = manifoldLayout === "centered";
+            // Each point carries both layouts; pick one and flatten to x/y/z
+            const pts = data.points.map(p => {
+                const [x, y, z] = centered ? p.centered : p.pca;
+                return { ...p, x, y, z };
+            });
+            const query = pts.find(p => p.kind === "query");
+            const rankOf = { clean: data.clean_rank, poisoned: data.poisoned_rank };
+            const pct = data.explained_variance.map(v => (v * 100).toFixed(0) + "%");
+            const captured = (data.explained_variance.reduce((a, b) => a + b, 0) * 100).toFixed(0);
+
+            document.getElementById("manifold-stats").innerHTML =
+                `<span>Poisoned rank <b>#${data.poisoned_rank}</b></span>` +
+                `<span>Clean rank <b>#${data.clean_rank}</b></span>` +
+                `<span>of <b>${data.num_documents}</b> docs</span>` +
+                `<span>Top-${data.top_k} ${data.poison_retrieved
+                    ? '<span class="badge bad">INCLUDES POISON</span>'
+                    : '<span class="badge good">CLEAN</span>'}</span>` +
+                (centered
+                    ? `<span>Distance from the query is exact cosine distance; direction from PCA. Sphere = top-${data.top_k} boundary (${data.retrieval_radius.toFixed(3)})</span>`
+                    : `<span>3D PCA keeps <b>${captured}%</b> of variance; ranks use all 384 dimensions</span>`);
+
+            // One trace per role so the legend doubles as the key
+            const traces = Object.entries(MANIFOLD_STYLE).map(([kind, st]) => {
+                const group = pts.filter(p => p.kind === kind);
+                const label = rankOf[kind] ? `${st.name} (rank #${rankOf[kind]})` : st.name;
+                return {
+                    type: 'scatter3d', mode: 'markers', name: label,
+                    x: group.map(p => p.x), y: group.map(p => p.y), z: group.map(p => p.z),
+                    text: group.map(p => wrapForHover(p.text)),
+                    customdata: group.map(p => p.distance),
+                    hovertemplate: `<b>${st.name}</b>` + (kind === "query" ? "" : " · cosine distance %{customdata:.3f}") +
+                                   `<br>%{text}<extra></extra>`,
+                    marker: { color: st.color, size: st.size, symbol: st.symbol, opacity: kind === "corpus" ? 0.75 : 1,
+                              line: { color: '#0f172a', width: 1 } },
+                };
+            });
+
+            // Retrieval links from the query to its true top-k neighbors
+            const link = (targets, name, color, width) => {
+                const xs = [], ys = [], zs = [];
+                targets.forEach(p => { xs.push(query.x, p.x, null); ys.push(query.y, p.y, null); zs.push(query.z, p.z, null); });
+                return { type: 'scatter3d', mode: 'lines', name, x: xs, y: ys, z: zs, hoverinfo: 'skip',
+                         line: { color, width } };
+            };
+            const topk = data.top_k_indices.map(i => pts[i]);
+            traces.push(link(topk.filter(p => p.kind !== "poisoned"), `Top-${data.top_k} retrieval`, '#fbbf24', 3));
+            const poison = topk.filter(p => p.kind === "poisoned");
+            if (poison.length) traces.push(link(poison, 'Retrieves the poison', '#f43f5e', 6));
+
+            let range = null;
+            if (centered) {
+                // Translucent sphere through the k-th nearest document: inside it = retrieved
+                const r = data.retrieval_radius, n = 28, m = 14, sx = [], sy = [], sz = [];
+                for (let i = 0; i <= m; i++) {
+                    const phi = Math.PI * i / m, rowX = [], rowY = [], rowZ = [];
+                    for (let j = 0; j <= n; j++) {
+                        const theta = 2 * Math.PI * j / n;
+                        rowX.push(r * Math.sin(phi) * Math.cos(theta));
+                        rowY.push(r * Math.sin(phi) * Math.sin(theta));
+                        rowZ.push(r * Math.cos(phi));
+                    }
+                    sx.push(rowX); sy.push(rowY); sz.push(rowZ);
+                }
+                traces.unshift({
+                    type: 'surface', name: `Top-${data.top_k} boundary`, x: sx, y: sy, z: sz,
+                    opacity: 0.12, showscale: false, showlegend: true, hoverinfo: 'skip',
+                    colorscale: [[0, '#fbbf24'], [1, '#fbbf24']],
+                    contours: { x: { highlight: false }, y: { highlight: false }, z: { highlight: false } },
+                });
+                const extent = Math.max(...pts.map(p => p.distance)) * 1.05;
+                range = [-extent, extent];
+            }
+
+            const axis = (title) => ({
+                title: { text: title, font: { size: 11, color: '#94a3b8' } },
+                gridcolor: '#334155', zerolinecolor: '#475569', showbackground: false,
+                showticklabels: false, showspikes: false,
+                ...(range ? { range } : {}),
+            });
+            const titles = centered ? ["", "", ""] : [`PC1 (${pct[0]})`, `PC2 (${pct[1]})`, `PC3 (${pct[2]})`];
+            Plotly.react('manifold-chart', traces, {
+                ...PLOT_LAYOUT,
+                margin: { t: 10, b: 10, l: 10, r: 10 },
+                legend: { orientation: 'h', y: 1.02, x: 0, font: { size: 11 } },
+                uirevision: manifoldLayout,
+                scene: {
+                    xaxis: axis(titles[0]), yaxis: axis(titles[1]), zaxis: axis(titles[2]),
+                    aspectmode: 'cube',
+                    bgcolor: '#1e293b',
+                    camera: { eye: { x: 1.15, y: 1.15, z: 0.65 } },
+                },
+            }, { displayModeBar: false, responsive: true });
+            orbitOnce();
+        }
+
+        // One slow orbit so the view reads as 3D; stops on interaction or reduced-motion preference
+        function orbitOnce() {
+            const el = document.getElementById("manifold-chart");
+            if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || el.dataset.orbited) return;
+            el.dataset.orbited = "1";
+            let stopped = false;
+            const stop = () => { stopped = true; };
+            el.addEventListener("mousedown", stop, { once: true });
+            el.addEventListener("wheel", stop, { once: true });
+            el.addEventListener("touchstart", stop, { once: true });
+            const start = performance.now(), duration = 4000, radius = Math.hypot(1.15, 1.15), base = Math.PI / 4;
+            const step = (now) => {
+                if (stopped) return;
+                const t = Math.min(1, (now - start) / duration);
+                const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+                const angle = base + eased * 2 * Math.PI;
+                Plotly.relayout(el, { 'scene.camera.eye': { x: radius * Math.cos(angle), y: radius * Math.sin(angle), z: 0.65 } });
+                if (t < 1) requestAnimationFrame(step);
+            };
+            requestAnimationFrame(step);
         }
 
         function updatePplChart(clean, poisoned) {

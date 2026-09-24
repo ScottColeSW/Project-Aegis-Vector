@@ -5,7 +5,7 @@ import json
 import numpy as np
 import requests
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 from sentence_transformers import SentenceTransformer
 
 # ---------------------------------------------------------------------------
@@ -156,6 +156,73 @@ class AegisScoringEngine:
             "cosine_sim_poison": cos_sim_poison,
             "proximity_advantage": proximity_advantage,
             "is_vulnerable": proximity_advantage > 0
+        }
+
+    # -----------------------------------------------------------------------
+    # Visualization: 3D Vector Manifold
+    # -----------------------------------------------------------------------
+    def compute_vector_manifold(
+        self,
+        query: str,
+        clean_doc: str,
+        poisoned_doc: str,
+        corpus: List[str],
+        top_k: int = 3
+    ) -> Dict[str, Any]:
+        """
+        Embeds the query, both documents, and a background corpus, then projects
+        everything to 3D with PCA for display.
+
+        Retrieval is ranked by cosine similarity in the full embedding space, not the
+        projection: PCA keeps only the top 3 of 384 dimensions, so on-screen distance
+        is an approximation and the returned ranking is what a retriever would see.
+
+        Two layouts are returned per point:
+          pca       - plain 3D PCA; shows the global shape of the corpus.
+          centered  - query at the origin, each document placed at its exact cosine
+                      distance from the query, in the direction PCA gives it. Distance
+                      to the query is exact here, so the top-k boundary is a sphere.
+        """
+        # A doc that is also in the corpus would otherwise appear twice and outrank itself
+        corpus = [d for d in corpus if d.strip() not in (clean_doc.strip(), poisoned_doc.strip())]
+        texts = corpus + [clean_doc, poisoned_doc, query]
+        kinds = ["corpus"] * len(corpus) + ["clean", "poisoned", "query"]
+        embeddings = self.embedder.encode(texts, normalize_embeddings=True)
+
+        # PCA via SVD of the mean-centered embedding matrix
+        centered = embeddings - embeddings.mean(axis=0)
+        _, singular_values, components = np.linalg.svd(centered, full_matrices=False)
+        coords = centered @ components[:3].T
+        variance = singular_values ** 2
+        explained = (variance[:3] / variance.sum()).tolist()
+
+        # Rank every document by cosine similarity to the query (normalized, so dot product)
+        similarities = embeddings[:-1] @ embeddings[-1]
+        order = np.argsort(-similarities)
+        ranking = [{"index": int(i), "kind": kinds[i], "cosine_similarity": float(similarities[i])} for i in order]
+        rank_of = {kind: next(r + 1 for r, item in enumerate(ranking) if item["kind"] == kind)
+                   for kind in ("clean", "poisoned")}
+
+        # Query-centered layout: exact cosine distance as radius, PCA direction as bearing
+        distances = np.append(1.0 - similarities, 0.0)
+        offsets = coords - coords[-1]
+        norms = np.linalg.norm(offsets, axis=1, keepdims=True)
+        directions = np.divide(offsets, norms, out=np.zeros_like(offsets), where=norms > 1e-9)
+        centered_coords = directions * distances[:, None]
+
+        return {
+            "points": [{"pca": [float(v) for v in c], "centered": [float(v) for v in qc],
+                        "distance": float(d), "kind": k, "text": t}
+                       for c, qc, d, k, t in zip(coords, centered_coords, distances, kinds, texts)],
+            "explained_variance": explained,
+            # Cosine distance of the k-th nearest document: the retrieval boundary
+            "retrieval_radius": float(1.0 - similarities[order[top_k - 1]]),
+            "top_k": top_k,
+            "top_k_indices": [item["index"] for item in ranking[:top_k]],
+            "clean_rank": rank_of["clean"],
+            "poisoned_rank": rank_of["poisoned"],
+            "num_documents": len(texts) - 1,
+            "poison_retrieved": rank_of["poisoned"] <= top_k
         }
 
     # -----------------------------------------------------------------------
