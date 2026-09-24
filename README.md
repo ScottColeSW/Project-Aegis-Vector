@@ -143,7 +143,7 @@ Switch the gate between **Off**, **Hold**, and **Flag**, pick a preset, and run.
 
 ### Black Hat vs White Hat
 
-![Episode 8 of the episode player: a forged one-off exception marked for review at the memory gate](docs/episode_player.png)
+![Episode 9 of the episode player: the borrowed $100,000 beats the answer check, then White Hat climbs the rematch ladder until the stacked light defenses hold it to 0%](docs/episode_player.png)
 
 `/episodes.html` replays the defenses battery as an arms race of comic-strip episodes: Black Hat plants a forgery, White Hat answers with a defense, a real model answers a real question, and the verdict is the measured share of answers that took the forgery across five models. Each loser's next move is the counter to what just beat him, across twelve episodes: a blunt override, a polite memo, an inside job through a trusted channel, a forged one-off exception at the memory gate, a borrowed real number that walks past the grounding check, and a forgery with no number at all, first plain and then written to be retrieved. Neither side wins for good, and the series ends on the move the battery hasn't measured yet. Every number and quoted answer comes from `results/defenses/defenses.json`; `?ep=N` links straight to an episode.
 
