@@ -188,7 +188,7 @@
 </head>
 <body>
 
-    <nav class="site-nav"><a href="about.html">About the Creator</a><a href="books.html">Books</a></nav>
+    <nav class="site-nav"><a href="episodes.html">Black Hat vs White Hat</a><a href="about.html">About the Creator</a><a href="books.html">Books</a></nav>
     <h1>Aegis Vector Telemetry Stream</h1>
     <div class="subtitle">RAG poisoning analysis: vector manifold, first-token refusal probability, and payload perplexity</div>
 
@@ -218,7 +218,7 @@
                 <button id="gate-hold" class="active" onclick="setGate('hold')">Hold</button>
                 <button id="gate-flag" onclick="setGate('flag')">Flag</button>
             </div>
-            <span class="manifold-stats" style="margin: 0;" id="gate-hint">A document that collides with the verified record is held out of the index until someone resolves it</span>
+            <span class="manifold-stats" style="margin: 0;" id="gate-hint">A collision, or an exception that changes a figure, is quarantined: held out of the index until someone reviews it</span>
         </div>
 
         <div class="controls">
@@ -722,8 +722,8 @@
         let costRows = [];
         const GATE_HINTS = {
             off: "No gate: every document goes straight into the index",
-            hold: "A document that collides with the verified record is held out of the index until someone resolves it",
-            flag: "A colliding document is still served, tagged DISPUTED with the competing figures",
+            hold: "A collision, or an exception that changes a figure, is quarantined: held out of the index until someone reviews it",
+            flag: "A quarantined document is still served, tagged DISPUTED or REVIEW NEEDED with the competing figures",
         };
 
         let presets = {};
@@ -760,15 +760,22 @@
         function renderGateVerdict(data) {
             const el = document.getElementById("gate-verdict");
             const badge = data.collides ? '<span class="badge good">COLLIDES</span>'
+                : data.review_needed ? '<span class="badge good">REVIEW NEEDED</span>'
                 : data.relation === "unfiled" ? '<span class="badge warn">NOT A REGISTERED FACT</span>'
-                : `<span class="badge warn">${data.relation.toUpperCase()}</span>`;
-            const values = data.competing_values
-                ? ` The new document states <b>${data.competing_values[0].map(v => "$" + v.toLocaleString()).join(", ")}</b>
-                    where the verified record states <b>${data.competing_values[1].map(v => "$" + v.toLocaleString()).join(", ")}</b>.` : "";
-            const action = !data.collides ? " The document was admitted: nothing in the memory contradicts it."
-                : gateMode === "hold" ? " The collision stays open for a person to resolve; the document is held out of the index meanwhile."
-                : " The collision stays open; the document is served tagged as disputed.";
-            el.innerHTML = `${badge} Filed as <b>${data.fact.replace(/_/g, " ")}</b>.${values}${action}`;
+                : `<span class="badge warn">${data.relation.toUpperCase().replace("_", " ")}</span>`;
+            const fmt = vs => vs.map(v => "$" + v.toLocaleString()).join(", ");
+            const values = !data.competing_values ? ""
+                : data.review_needed
+                    ? ` It is a specific-case exception stating <b>${fmt(data.competing_values[0])}</b>
+                        where the verified general rule states <b>${fmt(data.competing_values[1])}</b>: not a collision, but not silent either.`
+                    : ` The new document states <b>${fmt(data.competing_values[0])}</b>
+                        where the verified record states <b>${fmt(data.competing_values[1])}</b>.`;
+            const what = data.review_needed ? "The exception is quarantined for review" : "The collision stays open for a person to resolve";
+            const action = !data.quarantined ? " The document was admitted: nothing in the memory contradicts it."
+                : gateMode === "hold" ? ` ${what}; the document is held out of the index meanwhile.`
+                : ` ${what}; the document is served, tagged.`;
+            const scope = data.scope === "specific_case" ? " (a specific case)" : "";
+            el.innerHTML = `${badge} Filed as <b>${data.fact.replace(/_/g, " ")}</b>${scope}.${values}${action}`;
         }
 
         function renderAnswer(key, answer, placeholder) {
