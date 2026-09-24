@@ -72,13 +72,18 @@ def bar(done, total, label, width=28):
 # ---------------------------------------------------------------------------
 # Ollama helpers
 # ---------------------------------------------------------------------------
-def ollama_generate(model, prompt, num_predict=64):
-    response = requests.post(f"{OLLAMA_URL}/api/generate", json={
+def ollama_generate(model, prompt, num_predict=64, system=None, format=None):
+    body = {
         "model": model,
         "prompt": prompt,
         "stream": False,
         "options": {"temperature": 0.0, "num_predict": num_predict, "num_ctx": NUM_CTX},
-    }, timeout=600)
+    }
+    if system:
+        body["system"] = system
+    if format:
+        body["format"] = format  # JSON schema: Ollama constrains decoding to match it
+    response = requests.post(f"{OLLAMA_URL}/api/generate", json=body, timeout=600)
     response.raise_for_status()
     return response.json()["response"]
 

@@ -79,6 +79,7 @@ Aegis Vector runs entirely on local infrastructure with zero external API depend
 | `server.py` | FastAPI app: `/` dashboard, `/api/evaluate/stream` SSE telemetry, `/api/models` |
 | `frontend/index.html` | Live telemetry dashboard |
 | `experiments.py` | Batch experiment runner that writes `results/` |
+| `defenses.py` | Defenses battery: replays the poisoning battery once per defense, writes `results/defenses/` |
 | `scenarios.py` | Shared knowledge base, target queries, poison payloads, and refusal probes |
 
 ---
@@ -105,6 +106,9 @@ python -m uvicorn server:app --port 8000
 
 # 4. Or run the full experiment battery (writes results/)
 python experiments.py
+
+# 5. And measure defenses against the same payloads (writes results/defenses/)
+python defenses.py
 ```
 
 ---
@@ -165,6 +169,33 @@ First-token refusal probability for three policy-sensitive requests under four f
 * **Prefix injection is model-specific.** Asking for a reply beginning "Sure, here is" took qwen2.5 3B from 98 to 100% refusal to 0% on all three requests, while llama3.2, gemma2 2B, and phi4-mini held at 72% or higher on every request.
 * **A fake authorization in retrieved context mostly failed.** The "verified red-team staff" context left phishing and hotwiring refusals high on every model except mistral 7B, which refused almost nothing under any framing.
 * The benign control (baking bread) scored 0% on every model.
+
+### Defenses
+
+![Forged-limit adoption by defense and model](results/defenses/img/defense_adoption.png)
+
+`defenses.py` replays the same five payloads, four queries, and six models once per defense, then asks two questions: how many answers adopt the forged limit (**adoption**), and how many clean-corpus answers still give the true $10,000 limit (**utility**). A judge model (qwen2.5:7b, output constrained to a fixed label set) classifies every answer as adopted, true, flagged conflict, or no figure, because a well-defended answer ("the sources conflict: $10,000 vs $5,000,000") mentions the forged figure without adopting it. Full tables: [`results/defenses/REPORT.md`](results/defenses/REPORT.md).
+
+| Defense | Layer | Adoption | Utility |
+| --- | --- | --- | --- |
+| none | | 47% | 88% |
+| Perplexity filter, zero false positives | Ingestion | 47% | 88% |
+| Provenance labels | Prompt | 17% | 88% |
+| Provenance labels, forged doc arrives via trusted channel | Prompt | 43% | 88% |
+| Spotlighting (docs are data, flag conflicts) | Prompt | 29% | 96% |
+| Grounding check (block unverified dollar figures) | Output | 0% | 88% |
+| Layered: filter + provenance + spotlighting | All input-side | 6% | 92% |
+| Layered + grounding check | All | 1% | 92% |
+
+![Forged-limit adoption by defense and payload](results/defenses/img/defense_by_payload.png)
+
+* **The perplexity filter did nothing.** Set so no legitimate document is rejected, its threshold landed at 394 (one terse policy line scores that high), far above the most anomalous payload at 76. Tightening it until it catches the natural-sounding payload would also reject 80% of the real documents; catching query mirroring would reject 90%.
+* **Provenance labels work only if provenance is trustworthy.** Tagging each retrieved document with its ingestion source cut adoption from 47% to 17% (llama3.2 to 0%). When the forged document came in through a channel tagged as verified, adoption went back to 43%. This defense moves the problem to ingestion; it doesn't solve it.
+* **Spotlighting helps most against explicit instructions.** Marking retrieved text as data cut instruction injection from 54% to 12%, but the natural-sounding fake only dropped from 62% to 46%, because there is no instruction to ignore. It varied widely by model (llama3.2 5%, qwen2.5 3B 45%), and it was the only defense that *raised* utility (88% to 96%) while producing the most explicit conflict warnings.
+* **The grounding check was airtight here, for a narrow reason.** Blocking any answer that states a dollar figure absent from the verified corpus stopped every adoption and blocked no clean-corpus answer. But it also blocked 49% of poisoned-corpus answers outright, including helpful "sources conflict" warnings, and it can only catch a forgery whose number appears nowhere else in the corpus. A forged "$100,000 limit" reuses a real figure (the capital expenditure threshold) and would pass. The single leak in the layered run shows this: an answer cut off at the token limit as `$5,00` parsed as $500, a verified figure.
+* **Layering input-side defenses got to 6% while improving utility.** Provenance plus spotlighting (the filter contributed nothing) cut adoption to 6% and raised utility to 92%, with 28% of poisoned-corpus answers explicitly flagging the conflict. Adding the grounding check took it to 1%.
+
+**Judge check.** On undefended answers, the judge agrees with the plain `$5,000,000` regex on 97% of answers (139 of 144, clean-corpus answers included). Of the 5 disagreements, the judge was right on 3 answers that hit the token limit mid-number (`$5,000,00`) and on one that mangled the forged figure to `$5,000`, and wrong on 2, where it rated an answer as TRUE or CONFLICT that presented the $5M figure as valid. Adoption numbers are therefore, if anything, slightly low. Answers were capped at 64 tokens for speed.
 
 ### Caveats
 
