@@ -16,3 +16,6 @@ models/
 
 # Local live-run database from the episode player (the committed seed is results/live/seed_runs.jsonl)
 results/live/*.db
+
+# Demo videos: too large for the repo for now
+video/
