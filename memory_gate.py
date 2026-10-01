@@ -21,7 +21,7 @@ import json
 import time
 from dataclasses import dataclass, field
 
-from palimpsest.consult import DOMAIN_KINDS, Relation, apply_consult, consult
+from palimpsest.consult import DOMAIN_KINDS, Relation, apply_consult, consult, scan_other_domains
 from palimpsest.memory_store import InMemoryStore
 from palimpsest.models import DomainKind, Node, Origin, Scope
 
@@ -79,6 +79,7 @@ class Verdict:
     scope: str = "general"
     review_needed: bool = False
     adjudication: dict | None = None
+    scanned: bool = False  # caught by the cross-fact scan, not by consulting its own fact
 
     @property
     def collides(self):
@@ -172,12 +173,26 @@ class MemoryGate:
         optional model check, consulted only on reinforcements and review items; it can raise a flag,
         never lower one."""
         fact, scope = self.label(text, oracle=oracle_label)
+        store = store or self.store
+        arrival = self._node("arrival", text, fact, scope)
         if fact == OTHER:
-            return Verdict(fact=fact, relation="unfiled", scope=scope)
-        result = consult(store or self.store, self._node("arrival", text, fact, scope), adjudicator=adjudicator)
+            result = None
+        else:
+            result = consult(store, arrival, adjudicator=adjudicator)
+            if result.relation == Relation.COLLIDES or result.review_needed:
+                return self._verdict(fact, scope, result)
+        # Filing is the one step a document's own wording can steer, so a document that was not held under
+        # its filed fact (or was filed under none) is still checked against every registered claim
+        found = scan_other_domains(store, arrival)
+        if found is not None:
+            return self._verdict(fact, scope, found, scanned=True)
+        return Verdict(fact=fact, relation="unfiled", scope=scope) if result is None else self._verdict(fact, scope, result)
+
+    @staticmethod
+    def _verdict(fact, scope, result, scanned=False):
         return Verdict(
             fact=fact, relation=result.relation.value, scope=scope, review_needed=result.review_needed,
-            adjudication=result.adjudication,
+            adjudication=result.adjudication, scanned=scanned,
             related_text=result.related_node.text if result.related_node else None,
             competing_values=[sorted(s) for s in result.competing_values] if result.competing_values else None,
         )
@@ -228,10 +243,11 @@ def build_gates(labelers=("oracle", "llm")):
 
 def describe(verdict):
     if verdict.relation == "unfiled":
-        return f"filed as '{verdict.fact}' -> not a registered fact, passes unchecked"
+        return f"filed as '{verdict.fact}' -> not a registered fact, no registered claim contradicts it, admitted"
     detail = f" ({verdict.competing_values[0]} vs {verdict.competing_values[1]})" if verdict.competing_values else ""
     status = (f"{verdict.relation.upper()}, REVIEW NEEDED" if verdict.review_needed else verdict.relation.upper())
     if verdict.adjudication:
         status += f" [adjudicator: {verdict.adjudication['verdict']}]"
     scope = ", specific case" if verdict.scope == "specific_case" else ""
-    return f"filed as '{verdict.fact}'{scope} -> {status}{detail}"
+    caught = " [cross-fact scan]" if verdict.scanned else ""
+    return f"filed as '{verdict.fact}'{scope} -> {status}{detail}{caught}"
