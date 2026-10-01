@@ -5,6 +5,8 @@
 
 > **Empirical safety evaluation for enterprise AI systems.** Aegis Vector replaces qualitative "vibes-based" red-teaming with hard mathematical metrics, tracking vector manifold distortion, logit probability shifts, and token perplexity in local environments.
 
+**[Watch the demo on YouTube](https://youtu.be/dSOA-ScmUwY):** a forged procurement limit against five small local models, and the defenses that stop it.
+
 ---
 
 ## Overview
