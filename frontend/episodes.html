@@ -268,6 +268,7 @@
             <button id="btn-replay" onclick="playEpisode(current)">Replay</button>
             <select id="live-model" title="Model for a live run" aria-label="Model for a live run"></select>
             <button id="btn-live" onclick="playLive()" title="Run this episode now against the chosen model">Run live</button>
+            <button id="btn-live-all" onclick="playAllLive()" title="Run every episode, and each rematch, live against the chosen model, one after another">Run all live</button>
             <button id="btn-next" onclick="next()">Next &rarr;</button>
         </div>
     </div>
@@ -787,6 +788,19 @@ async function playLive() {
     try { await playEpisode(current, model); } finally { $("btn-live").disabled = false; }
 }
 
+async function playAllLive() {
+    const model = $("live-model").value;
+    if (!model) return;
+    $("btn-live-all").disabled = true; $("btn-live").disabled = true; $("btn-play").disabled = true;
+    try {
+        for (let i = 0; i < EPISODES.length; i++) {
+            if (!(await playEpisode(i, model))) break;
+            await sleep(900);
+            if (i === EPISODES.length - 1) showCliff();
+        }
+    } finally { $("btn-live-all").disabled = false; $("btn-live").disabled = false; $("btn-play").disabled = false; }
+}
+
 async function loadLiveModels() {
     try {
         const body = await (await fetch(`${API_BASE}/api/models`)).json();
@@ -795,7 +809,7 @@ async function loadLiveModels() {
         $("live-model").value = usable.find(m => m.startsWith("llama3")) || usable[0] || "";
         if (!usable.length) throw new Error("no models");
     } catch (e) {
-        $("live-model").style.display = "none"; $("btn-live").style.display = "none";
+        $("live-model").style.display = "none"; $("btn-live").style.display = "none"; $("btn-live-all").style.display = "none";
     }
 }
 
@@ -825,7 +839,7 @@ function showCliff() {
           <p style="margin:8px 0 0;color:var(--red);font-weight:700">${esc(CLIFF.note)} <a href="/" style="color:var(--red)">Open the dashboard</a></p></div>
         </div>`;
     c.classList.add("on");
-    $("ep-title").textContent = "To be continued";
+    $("ep-title").textContent = CLIFF.title;
     c.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
 }
 
@@ -879,7 +893,7 @@ function renderChips() {
         const t = LIVE.by_episode[ep.id];
         const live = t ? ` <small title="live runs that took the forgery">· live ${t.adopted}/${t.runs}</small>` : "";
         return `<button class="${cls}" onclick="playEpisode(${i})" title="${esc(ep.payload)} vs ${esc(ep.defense)}">${ep.number}. ${esc(ep.title)}${rounds}${live}</button>`;
-    }).join("") + (CLIFF ? `<button class="chip pending" onclick="showCliff()">?. To be continued</button>` : "");
+    }).join("") + (CLIFF ? `<button class="chip pending" onclick="showCliff()">?. ${esc(CLIFF.title)}</button>` : "");
 }
 
 async function load() {
