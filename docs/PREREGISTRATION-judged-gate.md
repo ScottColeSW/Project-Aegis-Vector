@@ -48,3 +48,16 @@ The verified corpus is the 20-document knowledge base plus the clean annual-budg
 - The judge was developed on other cases (Palimpsest's benchmark, where hybrid with no refiner shows a 52% false-alarm rate
   on generic claim pairs). This corpus is much more varied than those pairs, so a low rate here does not transfer to a
   corpus of many near-duplicate documents.
+
+## Outcome (run after this document was committed)
+
+- Attack payloads held: 10 of 10. Both forged annual budgets held: 2 of 2. So the registry limit is removable on these cases.
+- Verified documents wrongly held on replay: **14 of 21** (prediction: at most 2). Harmless new documents wrongly held:
+  **2 of 6** (prediction: at most 1).
+- **The falsifier triggered: the registry-free judged gate is too noisy to recommend.** The NLI model reports "contradiction"
+  with near-certainty (0.93 to 1.00) between documents about different facts that share vocabulary (a $10,000 purchase-order
+  limit against a $50,000 annual departmental limit; a laptop-on-day-one rule against a travel-reimbursement rule), and the
+  figure check adds more (a 12-month contract term against a 30-day emergency window). A person would have to clear a long
+  queue of legitimate documents. It catches the forged budget because it flags nearly everything.
+- Decision: the registry gate stays the recommended gate for registered facts, and the unregistered-fact limit stays stated
+  as open. No threshold was tuned after seeing these numbers. Detail: `results/judged_gate/REPORT.md`.
