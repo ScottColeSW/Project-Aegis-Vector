@@ -436,6 +436,9 @@ def list_presets():
     return DASHBOARD_PRESETS
 
 
+REASONING_MODELS = ("qwen3",)
+
+
 @app.get("/api/models")
 def list_models():
     """Lists installed completion models with sizes and whether each fits in free memory."""
@@ -444,8 +447,12 @@ def list_models():
         snapshot = guard.memory_snapshot()
         budget = snapshot["ram_available"] + (snapshot["vram_free"] or 0)
         names = sorted(n for n in catalog if not (n.endswith(":latest") and n.removesuffix(":latest") in catalog))
+        # Reasoning models spend the 128-token answer budget thinking, so a live answer would be the start of their reasoning.
+        # They work with JSON mode and no token cap (Evo uses qwen3 that way), which this pipeline does not do.
         models = [{"name": n, "size_gb": round(catalog[n] / guard.GB, 1),
-                   "fits": catalog[n] * guard.FOOTPRINT_FACTOR <= budget} for n in names]
+                   "fits": catalog[n] * guard.FOOTPRINT_FACTOR <= budget and not n.startswith(REASONING_MODELS),
+                   **({"note": "reasoning model: needs JSON mode and a larger token budget"} if n.startswith(REASONING_MODELS) else {})}
+                  for n in names]
         return {"ok": True, "models": models, "memory": guard.describe(snapshot)}
     except Exception as e:
         return {"ok": False, "models": [], "error": str(e)}
