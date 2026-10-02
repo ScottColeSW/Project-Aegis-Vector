@@ -57,3 +57,23 @@ policies can have.
 - Whoever can approve registrations decides what the gate protects. An attacker who reaches the approval step could register
   a forged figure as the verified one. That is a new attack surface; it is stated here and not measured.
 - Two forged-budget wordings and six harmless documents is a small sample.
+
+## Outcome (run after this document was committed)
+
+13 registry entries were proposed. Held: payloads **7 of 10**, forged budgets **2 of 2**, verified-document replays wrongly held
+**5 of 21**, harmless new documents wrongly held **0 of 6**.
+
+- **Two falsifiers triggered.** 7 of 10 payloads is at or below the 8 that was the bar for "worse at its original job" (the
+  hand-written registry holds 10 of 10), and 5 of 21 replays is above 2. So auto-proposed registration, approved as proposed, is
+  worse than the hand-written registry, and it is not recommended as it stands.
+- **The budgets were held, but one for the wrong reason.** The natural-wording forgery was filed under the proposed budget fact
+  and held against the real budget document, as intended. The dashboard's override was filed under the procurement-limit fact
+  and held against the procurement document: right outcome, wrong comparison.
+- **Why it fell short.** `llama3.2` wrote long, inconsistent fact names (one is 114 characters), and then, filing arrivals among
+  13 such facts, put several unrelated documents under one of them (4 of the 5 replay false alarms are the same fact) and left
+  3 payloads filed as `other`, where the cross-fact scan did not catch them. This is the filing step again, which was already
+  the weak point of the gate with a small model.
+- **What this does not show.** The person's step was "approve all", the worst case. A person who shortens and corrects the
+  proposals is a different experiment, not run here, and running it after seeing these numbers would be tuning the registry
+  to the test. The proposals are in `results/proposed_registry/proposals.json` for review. Registry authority as an attack
+  surface was not measured.
