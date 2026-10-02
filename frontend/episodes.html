@@ -458,7 +458,7 @@ async function panel2(ep) {
         case "grounding":
             doc.style.left = "190px"; await sleep(500);
             $("p2-prop").querySelector(".cabinet").classList.add("open");
-            if (ep.payload === "reused_figure") {
+            if (ep.payload === "reused_figure" || ep.payload === "inside_job") {
                 stamp.textContent = "FIGURE VERIFIED ✓"; stamp.className = "stamp green go";
                 foot.textContent = "The output check asks one question: does every dollar figure in the answer appear in a verified document? $100,000 does, as the capital expenditure threshold. Right number, wrong fact.";
             } else {
@@ -627,11 +627,13 @@ async function playEpisode(i, liveModel = null) {
 // ---- Rematches: White Hat climbs the ladder, one unrolled row per round ----
 const COUNTER_STAMPS = {
     stamp: ["UNVERIFIED UPLOAD", "red"], spotlight: ["WRAPPED AS DATA", "red"], grounding: ["ANSWER CHECKED", "red"],
-    layered: ["STACKED ×3", "red"], gate: ["QUARANTINED", "red"],
+    layered: ["STACKED ×3", "red"], layered_spoofed: ["STACKED, STAMP FORGED", "red"], stamp_spoofed: ["VERIFIED ✓", "green"], gate: ["QUARANTINED", "red"],
 };
 const DEFENSE_TITLES = {
     provenance_labels: "Source Stamps", spotlighting: "Spotlighting", grounding_check: "The Answer Check",
     layered: "Stack the Light Defenses", layered_grounded: "Stack Them and Check the Answer", gate_hold: "The Memory Gate",
+    provenance_spoofed: "Source Stamps (forged)", layered_spoofed: "Stack the Light Defenses (stamp forged)",
+    layered_grounded_spoofed: "Stack Them and Check the Answer (stamp forged)",
 };
 const ROUND_VERDICTS = { black: "Black Hat wins again", short: "Not enough", white: "White Hat wins" };
 
@@ -700,7 +702,7 @@ async function rematchChain(ep, token) {
         // Panel 1: White Hat's new method lands
         await sleep(500);
         row.querySelector(".agent").classList.remove("walk");
-        const [text, color] = rung.mechanism === "grounding" && ep.payload === "reused_figure"
+        const [text, color] = rung.mechanism === "grounding" && (ep.payload === "reused_figure" || ep.payload === "inside_job")
             ? ["FIGURE VERIFIED ✓", "green"] : COUNTER_STAMPS[rung.mechanism] || ["COUNTERED", "red"];
         const stamp = q(`rm${k}-stamp`);
         stamp.textContent = text; stamp.className = `stamp ${color} go`;
