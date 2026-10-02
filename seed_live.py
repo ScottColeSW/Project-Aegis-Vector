@@ -50,6 +50,11 @@ def main():
     ex.ollama_unload("llama3.2")  # the live gate's labeler
 
     LIVE_SEED.parent.mkdir(parents=True, exist_ok=True)
+    if args.episodes and LIVE_SEED.exists():
+        # a partial reseed replaces only the chosen episodes (for the chosen models); everything else is kept
+        keep = [json.loads(line) for line in LIVE_SEED.read_text(encoding="utf-8").splitlines() if line.strip()]
+        keep = [r for r in keep if not (str(r["episode"]).rstrip("R").split(":")[0] in args.episodes and r["model"] in args.models)]
+        rows = keep + rows
     LIVE_SEED.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     took = sum(r["adopted"] for r in rows)
     print(f"\n{len(rows)} runs, {took} took the forgery -> {LIVE_SEED}")
