@@ -17,6 +17,7 @@ forges the "verified" source stamp.
 | **Facts without figures** | The rules lean on numbers; the NLI alternative was too noisy; the registry covers only registered facts. | A forged name, date or policy with no figure has the weakest protection. |
 | **Poisoning the verified corpus** | If the trusted source is wrong, every defense downstream agrees with it. | Out of scope for a gate; needs provenance and review upstream. |
 | **Other languages and encodings** | A payload the English rules and small models read differently. | Untested. |
+| **Structured output and tool calls** | Agents mostly work in JSON or tool calls, not free-text answers; a defense measured only on free text may behave differently when the model fills a field. Raised by the project owner 2026-10-02. | Untested. Reasoning models such as `qwen3:4b` already work in JSON mode with no token cap (Evo uses them that way). A small first test: one model, one payload. |
 | **Registry authority** | Whoever can approve registrations decides what the gate protects; a forged figure registered as verified wins. | Stated as a limit in `PREREGISTRATION-proposed-registry.md`; not measured. |
 
 Known defenses that failed or were not enough, so they are not retried blindly: the perplexity filter (threshold above every
