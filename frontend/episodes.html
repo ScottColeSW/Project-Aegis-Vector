@@ -659,6 +659,7 @@ function rematchRow(k, rung, line) {
           <div class="caption">${esc(line)}</div>
           <div class="scene">
             <div style="position:absolute;left:8px;top:30px">${agentSVG("white", "walk")}</div>
+            <div style="position:absolute;left:46%;top:58px;width:50px" title="Black Hat watches his forgery meet the new defense">${agentSVG("black")}<svg viewBox="0 0 22 28" style="position:absolute;left:-18px;top:34px;width:20px;height:26px"><rect x="2" y="2" width="18" height="24" fill="#efe8d6" stroke="#151515" stroke-width="2"/><path d="M6 9 H16 M6 14 H16 M6 19 H12" stroke="#c62828" stroke-width="2"/></svg></div>
             <div style="position:absolute;right:${gate ? 30 : 16}px;top:${gate ? 22 : 36}px" class="rm-prop">${gate ? gateSVG : cabinetSVG}</div>
             <div class="stamp" id="rm${k}-stamp" style="left:62px;top:20px"></div>
           </div>
@@ -752,6 +753,10 @@ async function rematchChain(ep, token) {
         v.textContent = ROUND_VERDICTS[verdict] + (live ? " this round" : "");
         const chip = q(`rm${k}-chip`);
         chip.className = "verdict-chip " + verdict; chip.textContent = ROUND_VERDICTS[verdict];
+        // Black Hat has been watching his forgery: he cheers when it wins and is left sooty when it fails
+        const bh = row.querySelector('.agent[data-kind="black"]'), wh = row.querySelector('.agent[data-kind="white"]');
+        if (verdict === "black") { bh.classList.add("cheer"); wh.classList.add("sooty"); }
+        else if (verdict === "white") { wh.classList.add("cheer"); bh.classList.add("sooty"); }
         const battery = rung.adoption == null ? "" : `${Math.round(rung.adoption * 100)}%`;
         if (live) {
             q(`rm${k}-rate`).innerHTML = `This live answer <b>${adopted ? "took" : "did not take"}</b> ${esc(ep.planted)}.`
