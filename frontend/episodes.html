@@ -269,6 +269,7 @@
             <select id="live-model" title="Model for a live run" aria-label="Model for a live run"></select>
             <button id="btn-live" onclick="playLive()" title="Run this episode now against the chosen model">Run live</button>
             <button id="btn-live-all" onclick="playAllLive()" title="Run every episode, and each rematch, live against the chosen model, one after another">Run all live</button>
+            <button id="btn-sound" onclick="toggleSound()" title="Comic sound effects, made in your browser; off by default" aria-pressed="false">Sound: off</button>
             <button id="btn-next" onclick="next()">Next &rarr;</button>
         </div>
     </div>
@@ -968,6 +969,60 @@ async function load() {
         $("ep-title").textContent = `Could not load episodes: ${e.message}`;
     }
 }
+// ---- Sound: a few comic effects synthesized with the Web Audio API (no audio files). Off by default; the choice is remembered.
+const sfx = (() => {
+    let ctx = null, on = false;
+    try { on = localStorage.getItem("aegis-sound") === "on"; } catch (e) { /* storage may be blocked */ }
+    const tone = (freq, start, dur, type = "square", gain = 0.06, slideTo = null) => {
+        const o = ctx.createOscillator(), g = ctx.createGain(), t0 = ctx.currentTime + start;
+        o.type = type; o.frequency.setValueAtTime(freq, t0);
+        if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
+        g.gain.setValueAtTime(gain, t0); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        o.connect(g).connect(ctx.destination); o.start(t0); o.stop(t0 + dur + 0.02);
+    };
+    const noise = (start, dur, gain = 0.08) => {
+        const n = Math.floor(ctx.sampleRate * dur), buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
+        for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+        const src = ctx.createBufferSource(), g = ctx.createGain();
+        src.buffer = buf; g.gain.value = gain; src.connect(g).connect(ctx.destination); src.start(ctx.currentTime + start);
+    };
+    const effects = {
+        stamp: () => { noise(0, 0.08, 0.12); tone(110, 0, 0.12, "triangle", 0.12, 55); },                    // a thump
+        fooled: () => { [392, 330, 262].forEach((f, i) => tone(f, i * 0.16, 0.2, "sawtooth", 0.05)); tone(98, 0.5, 0.35, "sawtooth", 0.05, 70); }, // wah wah wah waaah
+        foiled: () => { [523, 659, 784].forEach((f, i) => tone(f, i * 0.11, 0.18, "square", 0.05)); tone(1047, 0.36, 0.3, "triangle", 0.07); },    // a rising ta-da
+        click: () => tone(660, 0, 0.05, "square", 0.04),
+    };
+    const play = name => {
+        if (!on) return;
+        try {
+            ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+            if (ctx.state === "suspended") ctx.resume();
+            effects[name] && effects[name]();
+        } catch (e) { /* no audio available: stay silent */ }
+    };
+    return { play, get on() { return on; }, set(v) { on = v; try { localStorage.setItem("aegis-sound", v ? "on" : "off"); } catch (e) { /* ignore */ } } };
+})();
+
+function toggleSound() {
+    sfx.set(!sfx.on);
+    const b = $("btn-sound");
+    b.textContent = "Sound: " + (sfx.on ? "on" : "off"); b.setAttribute("aria-pressed", String(sfx.on));
+    sfx.play("click");   // this click is also the gesture that lets the browser start audio
+}
+$("btn-sound").textContent = "Sound: " + (sfx.on ? "on" : "off");
+$("btn-sound").setAttribute("aria-pressed", String(sfx.on));
+
+// Effects follow the page's own state changes, so no animation code needs touching: a stamp landing, and a verdict appearing
+new MutationObserver(records => {
+    for (const r of records) {
+        const el = r.target;
+        if (el.classList.contains("stamp") && el.classList.contains("go") && !(r.oldValue || "").includes("go")) sfx.play("stamp");
+        if (el.classList.contains("verdict-big") && /(^| )(black|white)( |$)/.test(el.className) && !/(^| )(black|white)( |$)/.test(r.oldValue || "")) {
+            sfx.play(el.classList.contains("black") ? "fooled" : "foiled");
+        }
+    }
+}).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["class"], attributeOldValue: true });
+
 load();
 loadLiveModels();
 </script>
