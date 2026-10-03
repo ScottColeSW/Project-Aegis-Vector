@@ -260,8 +260,8 @@
 
     <div class="bar">
         <div class="score">
-            <div class="tally black" id="tally-black">Black Hat <b id="score-black">0</b></div>
-            <div class="tally white" id="tally-white">White Hat <b id="score-white">0</b></div>
+            <div class="tally black" id="tally-black" title="Each result counts once per page load: a battery result from Play all, or a live round from Run live">Black Hat <b id="score-black">0</b></div>
+            <div class="tally white" id="tally-white" title="Each result counts once per page load: a battery result from Play all, or a live round from Run live">White Hat <b id="score-white">0</b></div>
         </div>
         <div class="controls">
             <button class="primary" id="btn-play" onclick="playAll()">Play all</button>
@@ -583,11 +583,14 @@ async function panel4(ep) {
         if (t) $("p4-note").textContent = `Live so far on this episode: ${t.adopted} of ${t.runs} run${t.runs === 1 ? "" : "s"} took the forgery.`;
         const rec = $("live-rec"); if (rec) { rec.classList.remove("bump"); void rec.offsetWidth; rec.classList.add("bump"); }
     }
-    if (!liveOk && !scored.has(ep.id)) {
-        scored.add(ep.id);
-        score[ep.winner] += 1;
-        $("score-" + ep.winner).textContent = score[ep.winner];
-        const t = $("tally-" + ep.winner); t.classList.remove("bump"); void t.offsetWidth; t.classList.add("bump");
+    // The tallies count each result once per page load: a battery result from Play all, or a live round from Run live
+    const scoreKey = liveOk ? "live:" + ep.id : ep.id;
+    const scoreWinner = liveOk ? (ep.live.adopted ? "black" : "white") : ep.winner;
+    if (!scored.has(scoreKey)) {
+        scored.add(scoreKey);
+        score[scoreWinner] += 1;
+        $("score-" + scoreWinner).textContent = score[scoreWinner];
+        const t = $("tally-" + scoreWinner); t.classList.remove("bump"); void t.offsetWidth; t.classList.add("bump");
     }
     renderChips();
     await sleep(1400);
@@ -754,6 +757,13 @@ async function rematchChain(ep, token) {
             q(`rm${k}-rate`).innerHTML = `This live answer <b>${adopted ? "took" : "did not take"}</b> ${esc(ep.planted)}.`
                 + (battery ? `<br>Battery for this counter: <b>${battery}</b> took it.` : "");
             await loadLive();
+            const liveKey = `live:${ep.id}R${k}`;
+            if (!scored.has(liveKey)) {
+                scored.add(liveKey);
+                score[verdict] += 1;
+                $("score-" + verdict).textContent = score[verdict];
+                const t = $("tally-" + verdict); t.classList.remove("bump"); void t.offsetWidth; t.classList.add("bump");
+            }
         } else {
             q(`rm${k}-rate`).innerHTML = `<b>${battery}</b> of ${rung.answers} answers took ${esc(ep.planted)}`;
             outcomeBar(q(`rm${k}-bar`), q(`rm${k}-legend`), rung.outcomes, rung.answers);
