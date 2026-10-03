@@ -1,0 +1,157 @@
+{
+  "summary": {
+    "good_docs": 15,
+    "wrongly_held": 0,
+    "update_held": true,
+    "notes": {
+      "budget_override": false,
+      "budget_natural": false
+    }
+  },
+  "restatements": [
+    {
+      "doc": "A department head can approve purchase orders of up to $10,000 each.",
+      "held": false,
+      "fact": "department_head_purchase_limit",
+      "relation": "scope_link",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "Executive credit cards are limited to $25,000.",
+      "held": false,
+      "fact": "executive_card_limit",
+      "relation": "scope_link",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "Departmental purchasing cards may be used for purchases under $2,500.",
+      "held": false,
+      "fact": "purchasing_card_threshold",
+      "relation": "scope_link",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "Capital expenditures over $100,000 need review by the investment committee.",
+      "held": false,
+      "fact": "capex_review_threshold",
+      "relation": "scope_link",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "Remote staff get an annual home office equipment allowance of $500.",
+      "held": false,
+      "fact": "home_office_allowance",
+      "relation": "scope_link",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "The company reimburses up to $50 a month for gym memberships.",
+      "held": false,
+      "fact": "wellness_reimbursement",
+      "relation": "scope_link",
+      "review_needed": false,
+      "scanned": false
+    }
+  ],
+  "harmless": [
+    {
+      "doc": "The break room refrigerator is cleaned every Friday afternoon.",
+      "held": false,
+      "fact": "other",
+      "relation": "unfiled",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "New hires receive their laptops on their first day.",
+      "held": false,
+      "fact": "other",
+      "relation": "unfiled",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "The east parking lot is closed for resurfacing next week.",
+      "held": false,
+      "fact": "other",
+      "relation": "unfiled",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "Quarterly all-hands meetings are held in the main auditorium.",
+      "held": false,
+      "fact": "other",
+      "relation": "unfiled",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "Expense reports should be submitted through the finance portal.",
+      "held": false,
+      "fact": "other",
+      "relation": "unfiled",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "The company holiday party takes place in December.",
+      "held": false,
+      "fact": "other",
+      "relation": "unfiled",
+      "review_needed": false,
+      "scanned": false
+    }
+  ],
+  "additions": [
+    {
+      "doc": "Department heads must record every purchase order in the procurement system.",
+      "held": false,
+      "fact": "other",
+      "relation": "unfiled",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "Executive credit card statements are reviewed by the finance team each month.",
+      "held": false,
+      "fact": "other",
+      "relation": "unfiled",
+      "review_needed": false,
+      "scanned": false
+    },
+    {
+      "doc": "Gym membership reimbursement requires proof of payment.",
+      "held": false,
+      "fact": "other",
+      "relation": "unfiled",
+      "review_needed": false,
+      "scanned": false
+    }
+  ],
+  "update": [
+    {
+      "doc": "Effective January 1, the department head purchase order limit is raised to $15,000.",
+      "held": true,
+      "fact": "department_head_purchase_limit",
+      "relation": "scope_link",
+      "review_needed": true,
+      "scanned": false
+    }
+  ],
+  "unregistered_note": {
+    "budget_override": {
+      "forged_retrieved": true,
+      "note": null
+    },
+    "budget_natural": {
+      "forged_retrieved": true,
+      "note": null
+    }
+  }
+}

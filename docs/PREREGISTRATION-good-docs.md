@@ -52,3 +52,14 @@ document is retrieved for "What is the corporate budget limit?"
 
 15 documents written by one author; one labeler model; the arrivals are short single sentences. This checks the property
 claimed ("good documents pass"); it is not a rate.
+
+## Outcome (run after this document was committed)
+
+- **Good documents: 0 of 15 wrongly held** (6 restatements, 6 harmless, 3 additions). The prediction held.
+- **The authorized update was held** for review, as designed. A real change to a registered figure waits for a person; that is
+  a cost of the gate, not a false alarm.
+- **The conflict note did not appear for either forged budget** (the forged document was retrieved in both cases). The
+  prediction that it would appear for the natural-wording forgery was wrong. Cause: wording overlap with the true budget
+  document is 0.25 (dashboard wording) and 0.17 (natural wording), under the 0.3 bar, although the figures differ. So neither the
+  registry gate (the fact is unregistered) nor the retrieval-side note covers this case. Lowering the bar would catch both but
+  is tuning to this result and risks false notes; it would need its own pre-registration.
