@@ -12,7 +12,7 @@ from pathlib import Path
 
 from scenarios import PAYLOAD_TECHNIQUES
 
-DEFENSES = ["none", "spotlighting", "provenance_spoofed", "layered_spoofed", "layered_grounded_spoofed", "gate_hold"]
+DEFENSES = ["none", "conflict_note", "spotlighting", "provenance_spoofed", "layered_spoofed", "layered_grounded_spoofed", "gate_hold"]
 OUT = Path(__file__).parent / "results" / "defenses"
 
 

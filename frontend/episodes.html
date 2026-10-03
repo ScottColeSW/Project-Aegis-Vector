@@ -298,7 +298,7 @@ const scored = new Set();
 function agentSVG(kind, cls = "") {
     const body = kind === "black" ? "#151515" : "#fbf8ef";
     const lens = kind === "black" ? "#fbf8ef" : "#151515";
-    const band = kind === "black" ? "#c62828" : "#151515";
+    const band = kind === "black" ? "#c62828" : "#2e7d32";
     return `<svg class="agent ${cls}" viewBox="0 0 100 160" data-kind="${kind}">
       <g class="torso">
         <g class="hat"><ellipse cx="50" cy="38" rx="34" ry="7" fill="${body}" stroke="#151515" stroke-width="3"/>
@@ -806,7 +806,7 @@ async function loadLiveModels() {
         const body = await (await fetch(`${API_BASE}/api/models`)).json();
         const usable = (body.models || []).filter(m => m.fits).map(m => m.name);
         $("live-model").innerHTML = usable.map(m => `<option>${esc(m)}</option>`).join("");
-        $("live-model").value = usable.find(m => m.startsWith("llama3")) || usable[0] || "";
+        $("live-model").value = usable.find(m => m.startsWith("llama3.2")) || usable.find(m => m.startsWith("llama3")) || usable[0] || "";
         if (!usable.length) throw new Error("no models");
     } catch (e) {
         $("live-model").style.display = "none"; $("btn-live").style.display = "none"; $("btn-live-all").style.display = "none";
