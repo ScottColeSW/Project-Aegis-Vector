@@ -241,6 +241,24 @@ def build_gates(labelers=("oracle", "llm")):
     return gates
 
 
+def registry_coverage(labels=None):
+    """Which verified documents that state a figure are protected by a registered fact, and which are not.
+
+    The gate can only collide a forgery with a registered fact, so a verified document that states a figure but is filed
+    under none is a fact a forgery can change unchallenged. `labels` maps corpus index -> registered fact (default: the hand
+    labels, which the model labeler reproduces on this corpus). The dashboard presets' clean documents are included.
+    Deterministic: figures are found with Palimpsest's own quantity extractor, no model."""
+    from palimpsest.consult import _extract
+    from scenarios import DASHBOARD_PRESETS
+    labels = ORACLE_CORPUS_LABELS if labels is None else labels
+    docs = [(text, labels.get(i, OTHER)) for i, text in enumerate(CLEAN_CORPUS)]
+    docs += [(p["clean_doc"], OTHER) for p in DASHBOARD_PRESETS.values() if p["clean_doc"] not in CLEAN_CORPUS]
+    with_figure = [(t, f) for t, f in docs if _extract(t)]
+    covered = [{"text": t, "fact": f} for t, f in with_figure if f != OTHER]
+    unprotected = [t for t, f in with_figure if f == OTHER]
+    return {"total": len(with_figure), "covered": len(covered), "unprotected": unprotected, "protected": covered}
+
+
 def describe(verdict):
     if verdict.relation == "unfiled":
         return f"filed as '{verdict.fact}' -> not a registered fact, no registered claim contradicts it, admitted"

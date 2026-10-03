@@ -843,6 +843,39 @@ function next() {
     else showCliff();
 }
 
+async function runUnregistered() {
+    const model = ($("live-model") && $("live-model").value) || "llama3.2";
+    const out = $("unreg-demo"), btn = $("btn-unreg");
+    btn.disabled = true;
+    out.innerHTML = `<p style="margin:8px 0 0"><i>Running the forged annual budget through the real gate and ${esc(model)}…</i></p>`;
+    let r;
+    try {
+        r = await (await fetch(`${API_BASE}/api/unregistered/demo`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model }) })).json();
+    } catch (e) { r = { error: e.message }; }
+    btn.disabled = false;
+    if (r.error) { out.innerHTML = `<p style="margin:8px 0 0;color:var(--red)">Could not run it: ${esc(r.error)}</p>`; return; }
+    const gateLine = r.held
+        ? `The gate <b>held</b> it (${esc(r.gate.describe)}). The labeler happened to file it under a registered fact; reword it and it is admitted.`
+        : `The gate <b>admitted</b> it: ${esc(r.gate.describe)}.`;
+    out.innerHTML = `<div style="margin-top:10px;border-top:2px dashed var(--ink);padding-top:8px">
+        <p style="margin:0 0 4px"><b>The forgery:</b> &ldquo;${esc(r.forged)}&rdquo;</p>
+        <p style="margin:0 0 4px"><b>The verified document:</b> &ldquo;${esc(r.true_doc)}&rdquo;</p>
+        <p style="margin:0 0 4px"><b>The gate:</b> ${gateLine}</p>
+        <p style="margin:0 0 4px"><b>${esc(r.model)} is asked</b> &ldquo;${esc(r.query)}&rdquo; and answers:</p>
+        <div class="bubble a ${r.adopted ? "adopted" : ""}" style="position:static;margin:4px 0 6px">${esc(r.answer)}</div>
+        <p style="margin:0;font-weight:700;color:${r.adopted ? "var(--red)" : "var(--green)"}">${r.adopted
+            ? "Black Hat wins this round: the forged $5,000,000 limit got through."
+            : "This answer did not take the forged figure. One live answer is not a rate; press Show it again."}</p></div>`;
+}
+
+function coverageHTML(c) {
+    if (!c) return "";
+    return `<p style="margin:8px 0 0">The gate covers <b>${c.covered} of ${c.total}</b> verified documents that state a figure. `
+        + `<details style="display:inline"><summary style="cursor:pointer;font-weight:700">Show the ${c.unprotected.length} it does not</summary>`
+        + `<ul style="margin:6px 0 0 18px;padding:0">${c.unprotected.map(t => `<li>${esc(t)}</li>`).join("")}</ul></details></p>`;
+}
+
 function showCliff() {
     if (!CLIFF) return;
     playing++;
@@ -851,7 +884,10 @@ function showCliff() {
         <div style="display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center">
           <div style="width:70px">${agentSVG("black", "walk")}</div>
           <div><p style="margin:0 0 6px;font-weight:700">${esc(CLIFF.black)}</p><p style="margin:0">${esc(CLIFF.white)}</p>
-          <p style="margin:8px 0 0;color:var(--red);font-weight:700">${esc(CLIFF.note)} <a href="/" style="color:var(--red)">Open the dashboard</a></p></div>
+          <p style="margin:8px 0 0;color:var(--red);font-weight:700">${esc(CLIFF.note)}</p>
+          <p style="margin:10px 0 0"><button class="primary" id="btn-unreg" onclick="runUnregistered()">Show it</button></p>
+          <div id="unreg-demo"></div>
+          ${coverageHTML(CLIFF.coverage)}</div>
         </div>`;
     c.classList.add("on");
     $("ep-title").textContent = CLIFF.title;

@@ -436,6 +436,30 @@ def list_presets():
     return DASHBOARD_PRESETS
 
 
+class UnregisteredDemoRequest(BaseModel):
+    model: str
+
+
+@app.post("/api/unregistered/demo")
+def unregistered_demo(req: UnregisteredDemoRequest):
+    """Run the forged annual budget (a fact nobody registered) through the real gate and a real model."""
+    from episodes import run_unregistered_demo
+    fits, message = guard.preflight(req.model)
+    if not fits:
+        return {"error": message}
+    try:
+        return run_unregistered_demo(req.model, _load_engine())
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/coverage")
+def registry_coverage_endpoint():
+    """Verified documents that state a figure, split into protected by a registered fact and not."""
+    from memory_gate import registry_coverage
+    return registry_coverage()
+
+
 REASONING_MODELS = ("qwen3",)
 
 
