@@ -9,6 +9,25 @@
 
 ---
 
+## What this is, and what it is not
+
+**What it is.** A testbed with measured results for one attack: a forged document planted in a company knowledge base so that an assistant states a wrong policy figure. Ten forgeries, from a shouted override to a quiet memo written to be retrieved, are run against twelve defenses and seven small local models (up to 8B). Every claim in this repository comes from a saved run, and the predictions for the later experiments were written down before the runs, with the misses reported.
+
+**What the results support.**
+- The memory gate ([Palimpsest](https://github.com/ScottColeSW/Palimpsest)) held every forgery it was shown at 0% adoption, in every model, with legitimate documents passing (0 of 15 wrongly held) and genuine updates waiting for a person to approve.
+- The lighter defenses help in different places and none held everything. Loud attacks (overrides, injected instructions) are weak. Quiet ones (a plausible memo, a copied question, a borrowed real figure) are the ones that survive stamps, tags and a perplexity filter. Prompt-level defenses help a larger model much more than a small one.
+- Several ideas that sounded good did not work, and the write-ups say so: a registry-free gate (too many false alarms), a registry the agent writes (worse than one written by hand), a retrieval-side conflict note (helped on the quiet attacks, missed its target), and memory in the colony simulation (no measurable benefit).
+
+**What it does not show.**
+- **It is not a security product.** No one who knew about the gate has tried to beat it. The ten attacks were written by the author, and the soft spots found along the way (the filing step a model can be steered through, and the registry itself) are untested against an adaptive attacker.
+- **The gate protects only registered facts.** Of the 13 verified documents here that state a figure, 6 are covered. The ending of the [episode player](/episodes.html) runs the uncovered case live and lists the other seven.
+- **One family of attack, small models, one scenario.** The attacks not tried (several agreeing forgeries, slow drift, the memory write path, retrieval-level attacks, facts with no figures, a poisoned verified corpus, structured output) are listed in [`docs/FUTURE-ATTACKS.md`](docs/FUTURE-ATTACKS.md).
+- **Small samples.** Twenty answers per cell for the five-model runs (forty for the single-model runs), so results move in 2.5 to 5 point steps and ranges are wide.
+
+**What it is for.** A measured, honest map of which cheap defenses work, which do not, and why, plus a worked example of keeping a record of what is true as a defense. The memory itself, Palimpsest, is a separate library that stands on its own.
+
+---
+
 ## Overview
 
 Enterprise adoption of Large Language Models (LLMs) and Retrieval-Augmented Generation (RAG) assumes that safety alignment (e.g., RLHF, DPO) and semantic vector search provide robust boundaries against unauthorized actions. **Aegis Vector** provides a zero-leakage, locally containerized testbed designed to prove where and why these assumptions fail.
