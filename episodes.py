@@ -354,7 +354,7 @@ def run_live(number, model, engine, defense=None):
     ep = SCRIPT[number - 1]
     variant, defense = ep["payload"], defense or ep["defense"]
     poison = POISON_VARIANTS[variant]
-    filtered, provenance, spotlight, spoofed, gate_mode = dz.CONDITIONS[defense]
+    filtered, provenance, spotlight, spoofed, gate_mode, _note = dz.CONDITIONS[defense]
 
     # Ask a question the forgery actually reaches (top 3 with no defense), so the live run tests the
     # defense rather than a retrieval miss; fall back to the first question if it reaches none
