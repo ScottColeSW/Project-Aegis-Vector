@@ -302,9 +302,39 @@ Small samples: four queries per payload, nine payloads (the older experiments; t
 
 ---
 
+## Threat mapping
+
+Where this project's attacks and defenses sit in three public taxonomies: the [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) (ASI), the [OWASP Top 10 for LLM Applications 2025](https://genai.owasp.org/llm-top-10/) (LLM), and [MITRE ATLAS](https://atlas.mitre.org/). The classification is the author's reading of the saved results, not an endorsement by OWASP or MITRE.
+
+**Attacks tested**
+
+| Attack in this repo | OWASP agentic | OWASP LLM | MITRE ATLAS |
+| --- | --- | --- | --- |
+| Forged policy document planted in the knowledge base (all ten payloads, including `natural_policy`, `reused_figure`, `scoped_exception`, and the no-number forgeries) | ASI06 Memory & Context Poisoning | LLM04 Data and Model Poisoning, LLM08 Vector and Embedding Weaknesses | AML.T0070 RAG Poisoning |
+| Question-copying payloads written to be retrieved (`query_mirroring`, `no_number_mirroring`, `inside_job`) | ASI06 | LLM08 | AML.T0070 |
+| Injected instruction inside retrieved content (the `URGENT ... SYSTEM INSTRUCTION` override, multi-agent cross-domain injection use case) | ASI01 Agent Goal Hijack | LLM01 Prompt Injection (indirect) | AML.T0051.001 LLM Prompt Injection: Indirect |
+| Forged provenance stamp (`inside_job`, "arrives via trusted channel" conditions) | ASI06 | LLM04 | AML.T0070 |
+| Refusal tipping point (fiction framing, prefix injection, fake authorization in context) | none | LLM01 Prompt Injection (direct) | AML.T0051.000 LLM Prompt Injection: Direct |
+| Perplexity-filter evasion (payload stealth) | none | LLM01 | Tactic AML.TA0007 Defense Evasion |
+
+**Defenses measured**
+
+| Defense | Mitigates | Result in this repo |
+| --- | --- | --- |
+| Memory gate, hold ([Palimpsest](https://github.com/ScottColeSW/Palimpsest)) | ASI06, LLM04, LLM08 | 0% adoption on all ten payloads; covers only registered facts |
+| Provenance labels | ASI06, LLM08 | 21% adoption; 45% when the stamp is forged |
+| Spotlighting (retrieved text marked as data) | ASI01, LLM01 | 34% adoption overall; strongest against explicit instructions |
+| Grounding check (block unverified figures) | LLM09 Misinformation | 22% adoption; misses borrowed real figures and forgeries with no figure |
+| Perplexity filter | LLM01 | No effect at zero false positives |
+| Layered input-side defenses | ASI06, ASI01, LLM01 | 7% adoption; 30% with a forged stamp |
+
+**Not covered here.** ASI02 Tool Misuse and Exploitation, ASI03 Identity and Privilege Abuse, ASI04 Agentic Supply Chain Vulnerabilities, ASI05 Unexpected Code Execution, ASI07 Insecure Inter-Agent Communication, ASI08 Cascading Failures, ASI09 Human-Agent Trust Exploitation, and ASI10 Rogue Agents are outside this testbed. Within ASI06, the memory write path, slow drift, and several agreeing forgeries are untested; see [`docs/FUTURE-ATTACKS.md`](docs/FUTURE-ATTACKS.md).
+
+---
+
 ## About the creator
 
-Built by **Scott A. Cole**, an AI strategy consultant and the author of 31 books on AI strategy, GenAI, and
+Built by **Scott A. Cole**, an AI strategy consultant and the author of 30+ books on AI strategy, GenAI, and
 decision-making, including the five-book [**Stop Learning AI** series](https://www.amazon.com/dp/B0GPRFYCQF?&linkCode=ll2&tag=ifio42-20&linkId=b67e3c17a4eb0539b2ec9ec37ef410e4&language=en_US&ref_=as_li_ss_tl) for executives who need to
 make good AI decisions without becoming technical themselves. The app includes an **About** page and a **Books** page listing every title and edition ([`frontend/about.html`](frontend/about.html), [`frontend/books.html`](frontend/books.html); `/about.html` and `/books.html` with the server running). More projects, including [Palimpsest](https://github.com/ScottColeSW/Palimpsest), are at
 [github.com/ScottColeSW](https://github.com/ScottColeSW).
