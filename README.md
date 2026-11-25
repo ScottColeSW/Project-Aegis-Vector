@@ -332,6 +332,12 @@ Where this project's attacks and defenses sit in three public taxonomies: the [O
 
 ---
 
+## Related projects
+
+The [AI Agent Exposure Appraisal](https://github.com/ScottColeSW/ai-agent-exposure-appraisal) sets measured
+agent-risk results beside the questions a CISO, CTO, CFO or board member would ask, with the cost and the
+caveat next to each.
+
 ## About the creator
 
 Built by **Scott A. Cole**, an AI strategy consultant and the author of 30+ books on AI strategy, GenAI, and
